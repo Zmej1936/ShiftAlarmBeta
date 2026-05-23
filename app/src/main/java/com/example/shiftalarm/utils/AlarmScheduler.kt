@@ -8,6 +8,7 @@ import com.example.shiftalarm.data.Alarm
 import com.example.shiftalarm.data.ShiftType
 import com.example.shiftalarm.receivers.AlarmReceiver
 import java.util.Calendar
+import com.example.shiftalarm.utils.ShiftCalculator.getShiftTypeForDate
 
 class AlarmScheduler(private val context: Context) {
 

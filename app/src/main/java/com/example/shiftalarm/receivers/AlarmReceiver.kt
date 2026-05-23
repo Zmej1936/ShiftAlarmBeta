@@ -20,6 +20,7 @@ import com.example.shiftalarm.data.ShiftType
 import com.example.shiftalarm.utils.AlarmScheduler
 import com.example.shiftalarm.utils.ShiftCalculator
 
+
 class AlarmReceiver : BroadcastReceiver() {
 
     companion object {

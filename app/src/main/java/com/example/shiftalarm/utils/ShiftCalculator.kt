@@ -1,7 +1,8 @@
 package com.example.shiftalarm.utils
 
 import com.example.shiftalarm.data.ShiftType
-import java.util.Calendar
+import java.text.SimpleDateFormat
+import java.util.*
 
 object ShiftCalculator {
 
@@ -78,5 +79,41 @@ object ShiftCalculator {
             }
             else -> ShiftType.ALL
         }
+    }
+
+    // Новая функция для получения следующей даты срабатывания
+    fun getNextAlarmDateTime(hour: Int, minute: Int, targetShiftType: ShiftType, shiftCycle: Int): Calendar? {
+        val now = Calendar.getInstance()
+        val startCal = getStartCalendar()
+
+        val checkDate = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+
+        if (checkDate.timeInMillis <= now.timeInMillis) {
+            checkDate.add(Calendar.DAY_OF_YEAR, 1)
+        }
+
+        for (i in 0..60) {
+            val year = checkDate.get(Calendar.YEAR)
+            val month = checkDate.get(Calendar.MONTH) + 1
+            val day = checkDate.get(Calendar.DAY_OF_MONTH)
+
+            val shiftTypeForDate = getShiftTypeForDate(year, month, day, shiftCycle)
+
+            if (shiftTypeForDate == targetShiftType) {
+                return checkDate.clone() as Calendar
+            }
+            checkDate.add(Calendar.DAY_OF_YEAR, 1)
+        }
+        return null
+    }
+
+    fun formatAlarmDateTime(calendar: Calendar): String {
+        val formatter = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
+        return formatter.format(calendar.time)
     }
 }

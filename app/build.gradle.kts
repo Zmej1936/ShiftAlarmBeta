@@ -14,7 +14,7 @@ android {
         minSdk = 24
         targetSdk = 35
         versionCode = 1
-        versionName = "0.9.2"
+        versionName = "0.9.4"
     }
 
     buildFeatures {
@@ -55,4 +55,5 @@ dependencies {
 
     // Для работы с корутинами (если ещё нет)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
 }

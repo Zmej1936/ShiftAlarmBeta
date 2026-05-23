@@ -17,6 +17,7 @@ import androidx.navigation.NavController
 import com.example.shiftalarm.settingsDataStore
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import com.example.shiftalarm.utils.ShiftCalculator
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
