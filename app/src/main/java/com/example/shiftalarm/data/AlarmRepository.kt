@@ -18,6 +18,13 @@ class AlarmRepository(private val context: Context) {
     private val gson = Gson()
     private val alarmsKey = stringPreferencesKey("alarms_list")
 
+    private fun fixAlarm(alarm: Alarm): Alarm {
+        return alarm.copy(
+            shiftType = alarm.shiftType ?: ShiftType.ALL,
+            shiftCycle = if (alarm.shiftCycle <= 0) 2 else alarm.shiftCycle
+        )
+    }
+
     val alarmsFlow: Flow<List<Alarm>> = context.alarmsDataStore.data
         .catch { exception ->
             if (exception is IOException) {
@@ -29,7 +36,8 @@ class AlarmRepository(private val context: Context) {
         .map { preferences ->
             val json = preferences[alarmsKey] ?: "[]"
             val type = object : TypeToken<List<Alarm>>() {}.type
-            gson.fromJson(json, type)
+            val list: List<Alarm> = gson.fromJson(json, type)
+            list.map { fixAlarm(it) }  // <---修复
         }
 
     suspend fun saveAlarms(alarms: List<Alarm>) {
@@ -61,7 +69,8 @@ class AlarmRepository(private val context: Context) {
             .map { preferences ->
                 val json = preferences[alarmsKey] ?: "[]"
                 val type = object : TypeToken<List<Alarm>>() {}.type
-                gson.fromJson<List<Alarm>>(json, type)
+                val list: List<Alarm> = gson.fromJson(json, type)
+                list.map { fixAlarm(it) }
             }
             .catch { emit(emptyList()) }
             .firstOrNull() ?: emptyList()

@@ -2,13 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Существующие разрешения -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
-    <!-- Новое разрешение для полноэкранных уведомлений (Android 14+) -->
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
     <application
         android:allowBackup="true"
@@ -28,15 +29,14 @@
             </intent-filter>
         </activity>
 
-        <receiver
-            android:name=".receivers.AlarmReceiver"
-            android:exported="false" />
-        <receiver
-            android:name=".receivers.AlarmStopReceiver"
-            android:exported="false" />
-        <receiver
-            android:name=".receivers.SnoozeReceiver"
-            android:exported="false" />
+        <receiver android:name=".receivers.AlarmReceiver" android:exported="false" />
+        <receiver android:name=".receivers.AlarmStopReceiver" android:exported="false" />
+        <receiver android:name=".receivers.SnoozeReceiver" android:exported="false" />
+
+        <service
+            android:name=".receivers.AlarmSoundService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
     </application>
 </manifest>

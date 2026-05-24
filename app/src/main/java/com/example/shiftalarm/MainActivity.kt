@@ -13,43 +13,58 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.shiftalarm.data.AlarmRepository
 import com.example.shiftalarm.receivers.AlarmStopReceiver
 import com.example.shiftalarm.ui.screens.AlarmListScreen
 import com.example.shiftalarm.ui.screens.EditAlarmScreen
 import com.example.shiftalarm.ui.screens.SettingsScreen
 import com.example.shiftalarm.ui.theme.ShiftAlarmTheme
+import com.example.shiftalarm.utils.AlarmScheduler
 import com.example.shiftalarm.utils.ShiftCalculator
 import com.example.shiftalarm.viewmodel.AlarmViewModel
+import com.example.shiftalarm.viewmodel.AlarmViewModelFactory
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 
 
 class MainActivity : ComponentActivity() {
 
+    private val repository by lazy { AlarmRepository(applicationContext) }
+    private val factory by lazy { AlarmViewModelFactory(repository) }
+    private val viewModel: AlarmViewModel by viewModels {
+        object : ViewModelProvider.Factory {
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                @Suppress("UNCHECKED_CAST")
+                return factory.create() as T
+            }
+        }
+    }
+
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { /* разрешение получено или нет */ }
+    ) { }
 
     private val exactAlarmLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            if (alarmManager.canScheduleExactAlarms()) {
-                // разрешение получено
-            }
+            if (alarmManager.canScheduleExactAlarms()) { }
         }
     }
 
@@ -62,9 +77,13 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AppNavigation()
+                    AppNavigation(viewModel = viewModel)
                 }
             }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
         }
 
         if (intent?.getBooleanExtra("stop_alarm", false) == true) {
@@ -77,17 +96,27 @@ class MainActivity : ComponentActivity() {
 
         requestPermissions()
         lifecycleScope.launch {
-            val preferences = applicationContext.settingsDataStore.data.first()
-            val startDate = preferences[stringPreferencesKey("start_date")] ?: "2026-05-20"
-            ShiftCalculator.setStartDate(startDate)
+            try {
+                val prefs = applicationContext.settingsDataStore.data.first()
+                val startDate = prefs[stringPreferencesKey("start_date")] ?: "2026-05-20"
+                ShiftCalculator.setStartDate(startDate)
+
+                val globalShiftCycle = prefs[intPreferencesKey("shift_cycle")] ?: 2
+
+                // Перепланируем все активные будильники после запуска
+                val alarms = viewModel.alarms.first()
+                alarms.filter { it.isEnabled }.forEach { alarm ->
+                    AlarmScheduler(this@MainActivity).scheduleAlarm(alarm, globalShiftCycle)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
     @Composable
-    fun AppNavigation() {
+    fun AppNavigation(viewModel: AlarmViewModel) {
         val navController = rememberNavController()
-        val viewModel: AlarmViewModel = viewModel(factory = AlarmViewModel.Factory(application))
-
         NavHost(navController = navController, startDestination = "alarm_list") {
             composable("alarm_list") {
                 AlarmListScreen(navController, viewModel)
@@ -118,7 +147,6 @@ class MainActivity : ComponentActivity() {
                 exactAlarmLauncher.launch(intent)
             }
         }
-        // Разрешение на полноэкранные уведомления (Android 14+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             if (ContextCompat.checkSelfPermission(
                     this, Manifest.permission.USE_FULL_SCREEN_INTENT
