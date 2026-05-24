@@ -27,17 +27,10 @@ object ShiftCalculator {
         startDateString = date
     }
 
-    fun getTodayShiftType(shiftCycle: Int): ShiftType {
-        val today = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-        val daysSinceStart = daysBetween(getStartCalendar(), today)
-        return getShiftTypeByDays(daysSinceStart, shiftCycle)
-    }
-
+    /**
+     * Возвращает тип дня для заданной даты в зависимости от цикла смен.
+     * @param shiftCycle количество рабочих дней в блоке (например, 2 или 3)
+     */
     fun getShiftTypeForDate(year: Int, month: Int, day: Int, shiftCycle: Int): ShiftType {
         val calendar = Calendar.getInstance().apply {
             set(year, month - 1, day)
@@ -47,12 +40,18 @@ object ShiftCalculator {
             set(Calendar.MILLISECOND, 0)
         }
         val daysSinceStart = daysBetween(getStartCalendar(), calendar)
-        return getShiftTypeByDays(daysSinceStart, shiftCycle)
+        val cycleLength = shiftCycle * 2   // рабочие + выходные
+        val position = ((daysSinceStart % cycleLength) + cycleLength) % cycleLength
+        return if (position < shiftCycle) ShiftType.WORK_DAY else ShiftType.DAY_OFF
     }
 
     fun shouldAlarmRingToday(alarmShiftType: ShiftType, alarmShiftCycle: Int): Boolean {
         if (alarmShiftType == ShiftType.ALL) return true
-        val todayType = getTodayShiftType(alarmShiftCycle)
+        val today = Calendar.getInstance()
+        val year = today.get(Calendar.YEAR)
+        val month = today.get(Calendar.MONTH) + 1
+        val day = today.get(Calendar.DAY_OF_MONTH)
+        val todayType = getShiftTypeForDate(year, month, day, alarmShiftCycle)
         return todayType == alarmShiftType
     }
 
@@ -61,38 +60,14 @@ object ShiftCalculator {
         return (diffMillis / (24 * 60 * 60 * 1000)).toInt()
     }
 
-    private fun getShiftTypeByDays(daysSinceStart: Int, shiftCycle: Int): ShiftType {
-        val cycleLength = shiftCycle * 2
-        var position = daysSinceStart % cycleLength
-        if (position < 0) position += cycleLength
-        return when (shiftCycle) {
-            2 -> when (position) {
-                0 -> ShiftType.WORK_DAY_1
-                1 -> ShiftType.WORK_DAY_2
-                else -> ShiftType.DAY_OFF
-            }
-            3 -> when (position) {
-                0 -> ShiftType.WORK_DAY_1
-                1 -> ShiftType.WORK_DAY_2
-                2 -> ShiftType.WORK_DAY_3
-                else -> ShiftType.DAY_OFF
-            }
-            else -> ShiftType.ALL
-        }
-    }
-
-    // Новая функция для получения следующей даты срабатывания
     fun getNextAlarmDateTime(hour: Int, minute: Int, targetShiftType: ShiftType, shiftCycle: Int): Calendar? {
         val now = Calendar.getInstance()
-        val startCal = getStartCalendar()
-
         val checkDate = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, hour)
             set(Calendar.MINUTE, minute)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
         }
-
         if (checkDate.timeInMillis <= now.timeInMillis) {
             checkDate.add(Calendar.DAY_OF_YEAR, 1)
         }
@@ -101,10 +76,8 @@ object ShiftCalculator {
             val year = checkDate.get(Calendar.YEAR)
             val month = checkDate.get(Calendar.MONTH) + 1
             val day = checkDate.get(Calendar.DAY_OF_MONTH)
-
             val shiftTypeForDate = getShiftTypeForDate(year, month, day, shiftCycle)
-
-            if (shiftTypeForDate == targetShiftType) {
+            if (targetShiftType == ShiftType.ALL || shiftTypeForDate == targetShiftType) {
                 return checkDate.clone() as Calendar
             }
             checkDate.add(Calendar.DAY_OF_YEAR, 1)
