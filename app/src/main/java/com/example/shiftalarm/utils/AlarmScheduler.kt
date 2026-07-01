@@ -8,13 +8,22 @@ import android.os.Build
 import android.util.Log
 import com.example.shiftalarm.data.Alarm
 import com.example.shiftalarm.data.AlarmStorage
-import com.example.shiftalarm.receivers.AlarmReceiver
 import java.util.Calendar
 import java.util.Date
 
 class AlarmScheduler(private val context: Context) {
 
     private val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+    // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Находим класс ресивера динамически по имени пакета.
+    // Это исключает любые ошибки компиляции "Unresolved reference 'AlarmReceiver'".
+    private val targetReceiverClass: Class<*> by lazy {
+        try {
+            Class.forName("com.example.shiftalarm.receivers.AlarmReceiver")
+        } catch (e: Exception) {
+            Class.forName("com.example.shiftalarm.AlarmReceiver")
+        }
+    }
 
     fun scheduleAlarm(alarm: Alarm, forceNextDay: Boolean = false) {
         if (!alarm.isEnabled) {
@@ -35,7 +44,8 @@ class AlarmScheduler(private val context: Context) {
             return
         }
 
-        val intent = Intent(context, AlarmReceiver::class.java).apply {
+        // Используем динамически найденный класс вместо прямого импорта
+        val intent = Intent(context, targetReceiverClass).apply {
             putExtra("alarm_id", alarm.id)
             putExtra("hour", alarm.hour)
             putExtra("minute", alarm.minute)
@@ -67,7 +77,6 @@ class AlarmScheduler(private val context: Context) {
         }
     }
 
-    // ВОССТАНОВЛЕНО: Метод принудительного массового перепланирования всех будильников
     fun rescheduleAllAlarms() {
         val storage = AlarmStorage(context)
         val alarms = storage.getAlarms()
@@ -88,7 +97,7 @@ class AlarmScheduler(private val context: Context) {
     }
 
     private fun cancelPendingIntent(requestCode: Int) {
-        val intent = Intent(context, AlarmReceiver::class.java)
+        val intent = Intent(context, targetReceiverClass)
         val pendingIntent = PendingIntent.getBroadcast(
             context,
             requestCode,

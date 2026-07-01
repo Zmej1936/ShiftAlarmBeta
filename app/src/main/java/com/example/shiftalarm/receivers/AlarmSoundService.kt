@@ -6,15 +6,16 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.MediaPlayer
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
-import android.os.VibrationEffect
 import android.os.Vibrator
 import androidx.core.app.NotificationCompat
 import com.example.shiftalarm.MainActivity
 import com.example.shiftalarm.R
+import java.util.Locale
 
 class AlarmSoundService : Service() {
 
@@ -25,19 +26,29 @@ class AlarmSoundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val alarmId = intent?.getIntExtra("alarm_id", -1) ?: -1
         val label = intent?.getStringExtra("label") ?: "Будильник"
+        val hour = intent?.getIntExtra("hour", 8) ?: 8
+        val minute = intent?.getIntExtra("minute", 0) ?: 0
 
-        // 1. Захватываем WakeLock, чтобы процессор не уснул
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ShiftAlarm::WakeLockTag").apply {
-            acquire(10 * 60 * 1000L) // Лимит 10 минут
+            acquire(10 * 60 * 1000L)
         }
 
-        // 2. Показываем уведомление
-        showSimpleNotification(label, alarmId)
+        // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Сначала принудительно регистрируем Foreground-службу в системе Android
+        startForegroundServiceWithNotification(label, alarmId, hour, minute)
 
-        // 3. Запуск звука и вибрации
         startPlayback()
         startVibration()
+
+        val lockScreenIntent = Intent(this, MainActivity::class.java).apply {
+            putExtra("is_alarm_trigger", true)
+            putExtra("alarm_id", alarmId)
+            putExtra("label", label)
+            putExtra("hour", hour)
+            putExtra("minute", minute)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        startActivity(lockScreenIntent)
 
         return START_STICKY
     }
@@ -56,17 +67,12 @@ class AlarmSoundService : Service() {
 
     private fun startVibration() {
         try {
-            // ИСПРАВЛЕНО: Заменено на современный Context.VIBRATOR_SERVICE для устранения варнинга Java
             vibrator = getSystemService("vibrator") as Vibrator
             vibrator?.let {
                 if (it.hasVibrator()) {
                     val pattern = longArrayOf(0, 500, 500, 500)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        it.vibrate(VibrationEffect.createWaveform(pattern, 0))
-                    } else {
-                        @Suppress("DEPRECATION")
-                        it.vibrate(pattern, 0)
-                    }
+                    @Suppress("DEPRECATION")
+                    it.vibrate(pattern, 0)
                 }
             }
         } catch (e: Exception) {
@@ -74,14 +80,24 @@ class AlarmSoundService : Service() {
         }
     }
 
-    private fun showSimpleNotification(label: String, alarmId: Int) {
+    private fun startForegroundServiceWithNotification(label: String, alarmId: Int, hour: Int, minute: Int) {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel("alarm_channel", "Будильник", NotificationManager.IMPORTANCE_HIGH)
+            val channel = NotificationChannel("alarm_channel", "Будильник", NotificationManager.IMPORTANCE_HIGH).apply {
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                enableVibration(true)
+                setBypassDnd(true)
+            }
             manager.createNotificationChannel(channel)
         }
 
         val mainIntent = Intent(this, MainActivity::class.java).apply {
+            putExtra("is_alarm_trigger", true)
+            putExtra("alarm_id", alarmId)
+            putExtra("label", label)
+            putExtra("hour", hour)
+            putExtra("minute", minute)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
         val mainPendingIntent = PendingIntent.getActivity(
@@ -103,22 +119,32 @@ class AlarmSoundService : Service() {
             this, alarmId + 6000, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = NotificationCompat.Builder(this, "alarm_channel")
+        val notificationBuilder = NotificationCompat.Builder(this, "alarm_channel")
             .setContentTitle(label)
             .setContentText("Будильник работает!")
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setContentIntent(mainPendingIntent)
+            .setFullScreenIntent(mainPendingIntent, true)
             .addAction(android.R.drawable.ic_menu_recent_history, "Отложить 10 мин", snoozePendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Отключить", stopPendingIntent)
-            .build()
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setOngoing(true)
 
-        manager.notify(alarmId + 1000, notification)
+        val notification = notificationBuilder.build()
+        notification.flags = notification.flags or NotificationCompat.FLAG_INSISTENT
+
+        // ИСПРАВЛЕНО ДЛЯ ANDROID 14: Привязываем уведомление к Foreground-режиму
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(alarmId + 1000, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(alarmId + 1000, notification)
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        // ИСПРАВЛЕНО: Безопасное и изолированное уничтожение ресурсов внутри onDestroy сервиса
         try {
             if (wakeLock?.isHeld == true) wakeLock?.release()
             mediaPlayer?.stop()
