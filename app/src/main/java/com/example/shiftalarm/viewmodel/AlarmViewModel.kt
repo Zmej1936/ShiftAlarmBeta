@@ -1,52 +1,66 @@
 package com.example.shiftalarm.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.shiftalarm.data.Alarm
 import com.example.shiftalarm.data.AlarmRepository
-import kotlinx.coroutines.flow.SharingStarted
+import com.example.shiftalarm.utils.AlarmScheduler
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-class AlarmViewModel(private val repository: AlarmRepository) : ViewModel() {
+class AlarmViewModel(application: Application) : AndroidViewModel(application) {
 
-    val alarms: StateFlow<List<Alarm>> = repository.alarmsFlow
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+    private val context = application.applicationContext
+    private val scheduler = AlarmScheduler(context)
 
+    // Подписываем UI напрямую к потоку нашего реактивного репозитория
+    val alarms: StateFlow<List<Alarm>> = AlarmRepository.alarmsFlow
+
+    // Получение конкретного будильника по ID для экрана редактирования
+    fun getAlarmById(id: Int): kotlinx.coroutines.flow.Flow<Alarm?> {
+        return kotlinx.coroutines.flow.flow {
+            val list = AlarmRepository.alarmsFlow.value
+            emit(list.find { it.id == id })
+        }
+    }
+
+    // ИСПРАВЛЕНО: Сохранение через JSON-репозиторий
     fun insertAlarm(alarm: Alarm) {
         viewModelScope.launch {
-            repository.insertAlarm(alarm)
+            val currentList = AlarmRepository.alarmsFlow.value.toMutableList()
+            val index = currentList.indexOfFirst { it.id == alarm.id }
+            if (index != -1) {
+                currentList[index] = alarm
+            } else {
+                currentList.add(alarm)
+            }
+            AlarmRepository.saveAlarms(context, currentList)
+            if (alarm.isEnabled) {
+                scheduler.scheduleAlarm(alarm)
+            }
         }
     }
 
+    // ИСПРАВЛЕНО: Удаление через JSON-репозиторий
     fun deleteAlarm(alarm: Alarm) {
         viewModelScope.launch {
-            repository.deleteAlarm(alarm)
+            scheduler.cancelAllForAlarm(alarm)
+            val currentList = AlarmRepository.alarmsFlow.value.filter { it.id != alarm.id }
+            AlarmRepository.saveAlarms(context, currentList)
         }
     }
 
-    fun updateAlarmEnabled(alarm: Alarm, enabled: Boolean) {
+    // ИСПРАВЛЕНО: Переключение тумблера активности
+    fun updateAlarmEnabled(alarm: Alarm, isEnabled: Boolean) {
         viewModelScope.launch {
-            repository.insertAlarm(alarm.copy(isEnabled = enabled))
+            val updatedAlarm = alarm.copy(isEnabled = isEnabled)
+            if (isEnabled) {
+                scheduler.scheduleAlarm(updatedAlarm)
+            } else {
+                scheduler.cancelAllForAlarm(alarm)
+            }
+            AlarmRepository.updateAlarm(context, updatedAlarm)
         }
     }
-
-    fun getAlarmById(id: Int): StateFlow<Alarm?> {
-        return alarms.map { list -> list.find { it.id == id } }
-            .stateIn(
-                scope = viewModelScope,
-                started = SharingStarted.WhileSubscribed(5000),
-                initialValue = null
-            )
-    }
-}
-
-class AlarmViewModelFactory(private val repository: AlarmRepository) {
-    fun create(): AlarmViewModel = AlarmViewModel(repository)
 }

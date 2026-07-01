@@ -7,20 +7,21 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import com.example.shiftalarm.data.Alarm
+import com.example.shiftalarm.data.AlarmStorage
 import com.example.shiftalarm.receivers.AlarmReceiver
 import java.util.Calendar
+import java.util.Date
 
 class AlarmScheduler(private val context: Context) {
 
     private val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
-    fun scheduleAlarm(alarm: Alarm, globalShiftCycle: Int) {
+    fun scheduleAlarm(alarm: Alarm, forceNextDay: Boolean = false) {
         if (!alarm.isEnabled) {
             Log.d("AlarmScheduler", "Будильник ${alarm.label} выключен, не планируем")
             return
         }
 
-        // Проверяем разрешение на точные будильники (Android 12+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (!alarmManager.canScheduleExactAlarms()) {
                 Log.e("AlarmScheduler", "Нет разрешения на точные будильники!")
@@ -28,7 +29,7 @@ class AlarmScheduler(private val context: Context) {
             }
         }
 
-        val nextTriggerTime = findNextValidTriggerTime(alarm, globalShiftCycle)
+        val nextTriggerTime = findNextValidTriggerTime(alarm, forceNextDay)
         if (nextTriggerTime == null) {
             Log.e("AlarmScheduler", "Не удалось найти следующее время для будильника ${alarm.label}")
             return
@@ -36,13 +37,12 @@ class AlarmScheduler(private val context: Context) {
 
         val intent = Intent(context, AlarmReceiver::class.java).apply {
             putExtra("alarm_id", alarm.id)
-            putExtra("alarm_hour", alarm.hour)
-            putExtra("alarm_minute", alarm.minute)
-            putExtra("alarm_label", alarm.label)
-            putExtra("alarm_shift_type", alarm.shiftType.name)
-            putExtra("alarm_shift_cycle", globalShiftCycle)
-            putExtra("alarm_enabled", alarm.isEnabled)
-            putExtra("is_snooze", false)
+            putExtra("hour", alarm.hour)
+            putExtra("minute", alarm.minute)
+            putExtra("label", alarm.label)
+            putExtra("shift_type", alarm.shiftType.name)
+            putExtra("shift_cycle", alarm.shiftCycle)
+            putExtra("start_date", alarm.startDate ?: "2026-05-20")
         }
 
         val pendingIntent = PendingIntent.getBroadcast(
@@ -52,27 +52,39 @@ class AlarmScheduler(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        Log.d("AlarmScheduler", "Планирую будильник ${alarm.label} на ${java.util.Date(nextTriggerTime)}")
+        val sdfText = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault())
+        alarm.nextTriggerDateTime = sdfText.format(Date(nextTriggerTime))
 
-        // Основной метод для будильников
+        Log.d("AlarmScheduler", "Планирую будильник ${alarm.label} на ${Date(nextTriggerTime)}")
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             alarmManager.setAlarmClock(
                 AlarmManager.AlarmClockInfo(nextTriggerTime, pendingIntent),
                 pendingIntent
             )
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            alarmManager.setExact(AlarmManager.RTC_WAKEUP, nextTriggerTime, pendingIntent)
         } else {
-            alarmManager.set(AlarmManager.RTC_WAKEUP, nextTriggerTime, pendingIntent)
+            alarmManager.setExact(AlarmManager.RTC_WAKEUP, nextTriggerTime, pendingIntent)
+        }
+    }
+
+    // ВОССТАНОВЛЕНО: Метод принудительного массового перепланирования всех будильников
+    fun rescheduleAllAlarms() {
+        val storage = AlarmStorage(context)
+        val alarms = storage.getAlarms()
+        Log.d("AlarmScheduler", "Запущено фоновое обновление лимитов для ${alarms.size} будильников")
+        alarms.forEach { alarm ->
+            if (alarm.isEnabled) {
+                scheduleAlarm(alarm, forceNextDay = false)
+                storage.updateAlarm(alarm)
+            }
         }
     }
 
     fun cancelAllForAlarm(alarm: Alarm) {
-        cancelPendingIntent(alarm.id)          // основное расписание
-        cancelPendingIntent(alarm.id + 1000)   // кнопка "Отложить"
-        cancelPendingIntent(alarm.id + 2000)   // повторный отложенный звонок
-        cancelPendingIntent(alarm.id + 3000)   // авто-остановка через 90 секунд
-        Log.d("AlarmScheduler", "Отменены все PendingIntent для будильника ${alarm.id}")
+        cancelPendingIntent(alarm.id)
+        cancelPendingIntent(alarm.id + 1000)
+        cancelPendingIntent(alarm.id + 2000)
+        cancelPendingIntent(alarm.id + 3000)
     }
 
     private fun cancelPendingIntent(requestCode: Int) {
@@ -87,27 +99,31 @@ class AlarmScheduler(private val context: Context) {
         pendingIntent.cancel()
     }
 
-    private fun findNextValidTriggerTime(alarm: Alarm, shiftCycle: Int): Long? {
+    private fun findNextValidTriggerTime(alarm: Alarm, forceNextDay: Boolean): Long? {
         val now = Calendar.getInstance()
-        var checkCalendar = Calendar.getInstance().apply {
+        val checkCalendar = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, alarm.hour)
             set(Calendar.MINUTE, alarm.minute)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
-            if (timeInMillis <= now.timeInMillis) {
+
+            if (forceNextDay || timeInMillis <= now.timeInMillis) {
                 add(Calendar.DAY_OF_YEAR, 1)
             }
         }
 
         var daysChecked = 0
         val maxDays = 60
+        val startDateStr = alarm.startDate ?: "2026-05-20"
 
         while (daysChecked < maxDays) {
             val year = checkCalendar.get(Calendar.YEAR)
             val month = checkCalendar.get(Calendar.MONTH) + 1
             val day = checkCalendar.get(Calendar.DAY_OF_MONTH)
 
-            val shiftTypeForDate = ShiftCalculator.getShiftTypeForDate(year, month, day, shiftCycle)
+            val shiftTypeForDate = ShiftCalculator.getShiftTypeForDate(
+                year, month, day, alarm.shiftCycle, startDateStr
+            )
 
             val shouldRing = when (alarm.shiftType) {
                 com.example.shiftalarm.data.ShiftType.ALL -> true

@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import com.example.shiftalarm.utils.ShiftCalculator
 
 private val android.content.Context.dataStore by preferencesDataStore("settings")
 
@@ -27,15 +26,17 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 preferences[START_DATE_KEY] ?: "2026-05-19"
             }.collect { date ->
                 _startDate.value = date
-                // Обновляем глобальный ShiftCalculator
-                com.example.shiftalarm.utils.ShiftCalculator.setStartDate(date)
+                // ИСПРАВЛЕНО: Убран вызов удаленного метода ShiftCalculator.setStartDate(date)
             }
         }
     }
 
-    suspend fun saveStartDate(date: String) {
-        context.dataStore.edit { preferences ->
-            preferences[START_DATE_KEY] = date
+    // ИСПРАВЛЕНО: Убран лишний suspend (так как внутри запускается корутина) и добавлен context.
+    fun saveStartDate(date: String) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[START_DATE_KEY] = date
+            }
         }
     }
 }
