@@ -13,7 +13,7 @@ class AlarmReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val alarmId = intent.getIntExtra("alarm_id", -1)
-        val hour = intent.getIntExtra("hour", 0)
+        val hour = intent.getIntExtra("hour", 8)
         val minute = intent.getIntExtra("minute", 0)
         val label = intent.getStringExtra("label") ?: "Будильник"
         val shiftTypeName = intent.getStringExtra("shift_type") ?: "ALL"
@@ -27,24 +27,25 @@ class AlarmReceiver : BroadcastReceiver() {
         val shouldRing = ShiftCalculator.shouldAlarmRingToday(shiftType, shiftCycle, startDateStr)
 
         if (!shouldRing) {
-            Log.d("AlarmSched", "Сегодня выходной. Молча перепланируем на следующий день.")
-            // Если сегодня выходной, просто регистрируем триггер на следующий день в системе
+            Log.d("AlarmSched", "Сегодня выходной по графику смен. Молча планируем следующий день.")
             val alarm = Alarm(alarmId, hour, minute, label, shiftType, shiftCycle, true, startDateStr)
             AlarmScheduler(context).scheduleAlarm(alarm)
             return
         }
 
-        // 2. Если сегодня рабочий день — запускаем проигрывание звука
+        // 2. Если сегодня рабочий день — запускаем фоновую аудио-службу звонка
         Log.d("AlarmSched", "Рабочий день! Включаем звук будильника.")
         val serviceIntent = Intent(context, AlarmSoundService::class.java).apply {
             putExtra("alarm_id", alarmId)
             putExtra("label", label)
+            putExtra("hour", hour)
+            putExtra("minute", minute)
         }
-        context.startService(serviceIntent)
 
-        // 3. ИСПРАВЛЕНО: Вместо временной задержки Handler, мы просто планируем следующий день.
-        // AlarmManager обновит интент, а UI обновится, когда пользователь нажмет "Отключить".
-        val alarm = Alarm(alarmId, hour, minute, label, shiftType, shiftCycle, true, startDateStr)
-        AlarmScheduler(context).scheduleAlarm(alarm)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            context.startForegroundService(serviceIntent)
+        } else {
+            context.startService(serviceIntent)
+        }
     }
 }
