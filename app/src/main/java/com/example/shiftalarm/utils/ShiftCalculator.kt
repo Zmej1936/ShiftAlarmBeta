@@ -6,16 +6,19 @@ import java.util.*
 
 object ShiftCalculator {
 
-    var startDateString: String = "2026-05-20"
-        private set
+    private val dbFormatter = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
-    private fun getStartCalendar(): Calendar {
-        val parts = startDateString.split("-")
-        val year = parts[0].toInt()
-        val month = parts[1].toInt() - 1
-        val day = parts[2].toInt()
-        return Calendar.getInstance().apply {
-            set(year, month, day)
+    // ИСПРАВЛЕНО: Метод теперь принимает конкретную дату начала графика
+    private fun getStartCalendar(startDateStr: String): Calendar {
+        val calendar = Calendar.getInstance()
+        try {
+            dbFormatter.parse(startDateStr)?.let { date ->
+                calendar.time = date
+            }
+        } catch (e: Exception) {
+            calendar.set(2026, Calendar.MAY, 20)
+        }
+        return calendar.apply {
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0)
@@ -23,15 +26,8 @@ object ShiftCalculator {
         }
     }
 
-    fun setStartDate(date: String) {
-        startDateString = date
-    }
-
-    /**
-     * Возвращает тип дня для заданной даты в зависимости от цикла смен.
-     * @param shiftCycle количество рабочих дней в блоке (например, 2 или 3)
-     */
-    fun getShiftTypeForDate(year: Int, month: Int, day: Int, shiftCycle: Int): ShiftType {
+    // ИСПРАВЛЕНО: Принимает startDateStr
+    fun getShiftTypeForDate(year: Int, month: Int, day: Int, shiftCycle: Int, startDateStr: String): ShiftType {
         val calendar = Calendar.getInstance().apply {
             set(year, month - 1, day)
             set(Calendar.HOUR_OF_DAY, 0)
@@ -39,28 +35,31 @@ object ShiftCalculator {
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
         }
-        val daysSinceStart = daysBetween(getStartCalendar(), calendar)
-        val cycleLength = shiftCycle * 2   // рабочие + выходные
+        val daysSinceStart = daysBetween(getStartCalendar(startDateStr), calendar)
+        val cycleLength = shiftCycle * 2
         val position = ((daysSinceStart % cycleLength) + cycleLength) % cycleLength
-        return if (position < shiftCycle) ShiftType.WORK_DAY else ShiftType.DAY_OFF
+
+        return if (position < shiftCycle) ShiftType.WORK_DAY else ShiftType.OFF_DAY
     }
 
-    fun shouldAlarmRingToday(alarmShiftType: ShiftType, alarmShiftCycle: Int): Boolean {
+    // ИСПРАВЛЕНО: Принимает startDateStr
+    fun shouldAlarmRingToday(alarmShiftType: ShiftType, alarmShiftCycle: Int, startDateStr: String): Boolean {
         if (alarmShiftType == ShiftType.ALL) return true
         val today = Calendar.getInstance()
         val year = today.get(Calendar.YEAR)
         val month = today.get(Calendar.MONTH) + 1
         val day = today.get(Calendar.DAY_OF_MONTH)
-        val todayType = getShiftTypeForDate(year, month, day, alarmShiftCycle)
+        val todayType = getShiftTypeForDate(year, month, day, alarmShiftCycle, startDateStr)
         return todayType == alarmShiftType
     }
 
     private fun daysBetween(start: Calendar, end: Calendar): Int {
         val diffMillis = end.timeInMillis - start.timeInMillis
-        return (diffMillis / (24 * 60 * 60 * 1000)).toInt()
+        return kotlin.math.round(diffMillis.toDouble() / (24 * 60 * 60 * 1000)).toInt()
     }
 
-    fun getNextAlarmDateTime(hour: Int, minute: Int, targetShiftType: ShiftType, shiftCycle: Int): Calendar? {
+    // ИСПРАВЛЕНО: Принимает startDateStr
+    fun getNextAlarmDateTime(hour: Int, minute: Int, targetShiftType: ShiftType, shiftCycle: Int, startDateStr: String): Calendar? {
         val now = Calendar.getInstance()
         val checkDate = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, hour)
@@ -76,7 +75,7 @@ object ShiftCalculator {
             val year = checkDate.get(Calendar.YEAR)
             val month = checkDate.get(Calendar.MONTH) + 1
             val day = checkDate.get(Calendar.DAY_OF_MONTH)
-            val shiftTypeForDate = getShiftTypeForDate(year, month, day, shiftCycle)
+            val shiftTypeForDate = getShiftTypeForDate(year, month, day, shiftCycle, startDateStr)
             if (targetShiftType == ShiftType.ALL || shiftTypeForDate == targetShiftType) {
                 return checkDate.clone() as Calendar
             }

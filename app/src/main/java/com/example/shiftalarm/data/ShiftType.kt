@@ -1,7 +1,7 @@
 package com.example.shiftalarm.data
 
 enum class ShiftType {
-    ALL,
     WORK_DAY,
-    DAY_OFF
+    OFF_DAY, // <- Если тут написано DAY_OFF, то в коде выше замените OFF_DAY на DAY_OFF
+    ALL
 }
