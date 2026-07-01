@@ -1,16 +1,21 @@
 package com.example.shiftalarm.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.example.shiftalarm.data.Alarm
@@ -43,12 +48,10 @@ fun EditAlarmScreen(
 
     var showTimePicker by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
-
-    // Состояние для открытия выпадающего списка
     var dropdownExpanded by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
-    val formatter = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
+    val formatter = remember { SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()) }
 
     LaunchedEffect(alarm) {
         alarm?.let {
@@ -58,7 +61,7 @@ fun EditAlarmScreen(
             shiftType = it.shiftType
             shiftCycle = it.shiftCycle
             try {
-                formatter.parse(it.startDate ?: "2026-05-20")?.time?.let { millis ->
+                SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(it.startDate ?: "2026-05-20")?.time?.let { millis ->
                     selectedDateMillis = millis
                 }
             } catch (e: Exception) {
@@ -70,7 +73,7 @@ fun EditAlarmScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (alarmId == -1) "Новый будильник" else "Редактировать") },
+                title = { Text("Параметры будильника") },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
@@ -79,37 +82,41 @@ fun EditAlarmScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = {
-                scope.launch {
-                    val formattedDate = formatter.format(Date(selectedDateMillis))
+            Button(
+                onClick = {
+                    scope.launch {
+                        val dbDateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                        val formattedDate = dbDateFormat.format(Date(selectedDateMillis))
 
-                    val alarmToSave = Alarm(
-                        id = if (alarmId == -1) System.currentTimeMillis().toInt() else alarmId,
-                        hour = hour,
-                        minute = minute,
-                        label = label,
-                        shiftType = shiftType,
-                        shiftCycle = shiftCycle,
-                        isEnabled = true,
-                        startDate = formattedDate
-                    )
+                        val alarmToSave = Alarm(
+                            id = if (alarmId == -1) System.currentTimeMillis().toInt() else alarmId,
+                            hour = hour,
+                            minute = minute,
+                            label = label,
+                            shiftType = shiftType,
+                            shiftCycle = shiftCycle,
+                            isEnabled = true,
+                            startDate = formattedDate
+                        )
 
-                    val scheduler = AlarmScheduler(context)
-                    scheduler.scheduleAlarm(alarmToSave)
+                        val scheduler = AlarmScheduler(context)
+                        scheduler.scheduleAlarm(alarmToSave)
 
-                    val currentAlarms = AlarmRepository.alarmsFlow.value.toMutableList()
-                    if (alarmId == -1) {
-                        currentAlarms.add(alarmToSave)
-                    } else {
-                        val idx = currentAlarms.indexOfFirst { it.id == alarmId }
-                        if (idx != -1) currentAlarms[idx] = alarmToSave else currentAlarms.add(alarmToSave)
+                        val currentAlarms = AlarmRepository.alarmsFlow.value.toMutableList()
+                        if (alarmId == -1) {
+                            currentAlarms.add(alarmToSave)
+                        } else {
+                            val idx = currentAlarms.indexOfFirst { it.id == alarmId }
+                            if (idx != -1) currentAlarms[idx] = alarmToSave else currentAlarms.add(alarmToSave)
+                        }
+
+                        AlarmRepository.saveAlarms(context, currentAlarms)
+                        navController.popBackStack()
                     }
-
-                    AlarmRepository.saveAlarms(context, currentAlarms)
-                    navController.popBackStack()
-                }
-            }) {
-                Text(modifier = Modifier.padding(horizontal = 16.dp), text = "Сохранить")
+                },
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text("Сохранить", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             }
         }
     ) { padding ->
@@ -117,8 +124,9 @@ fun EditAlarmScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
             OutlinedTextField(
                 value = label,
@@ -127,67 +135,72 @@ fun EditAlarmScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            OutlinedTextField(
-                value = String.format("%02d:%02d", hour, minute),
-                onValueChange = {},
-                label = { Text("Время срабатывания") },
-                readOnly = true,
-                enabled = false,
-                colors = OutlinedTextFieldDefaults.colors(
-                    disabledTextColor = MaterialTheme.colorScheme.onSurface,
-                    disabledBorderColor = MaterialTheme.colorScheme.outline,
-                    disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                ),
+            Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { showTimePicker = true }
-            )
+                    .clickable { showTimePicker = true },
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Время срабатывания", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = String.format(Locale.US, "%02d:%02d", hour, minute),
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
 
-            OutlinedTextField(
-                value = formatter.format(Date(selectedDateMillis)),
-                onValueChange = {},
-                label = { Text("Дата начала графика смен") },
-                readOnly = true,
-                enabled = false,
-                colors = OutlinedTextFieldDefaults.colors(
-                    disabledTextColor = MaterialTheme.colorScheme.onSurface,
-                    disabledBorderColor = MaterialTheme.colorScheme.outline,
-                    disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                ),
+            Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { showDatePicker = true }
-            )
+                    .clickable { showDatePicker = true },
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Дата начала графика смен", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = formatter.format(Date(selectedDateMillis)),
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
 
             OutlinedTextField(
-                value = shiftCycle.toString(),
-                onValueChange = { shiftCycle = it.toIntOrNull() ?: 2 },
+                value = if (shiftCycle == 0) "" else shiftCycle.toString(),
+                onValueChange = { shiftCycle = it.toIntOrNull() ?: 0 },
                 label = { Text("Периодичность цикла (дней)") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // ДОБАВЛЕНО: Красивый выпадающий список для выбора типа смены
             Box(modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = when(shiftType) {
-                        ShiftType.WORK_DAY -> "Рабочий день"
-                        ShiftType.OFF_DAY -> "Выходной день"
-                        ShiftType.ALL -> "Каждый день"
-                    },
-                    onValueChange = {},
-                    label = { Text("Тип смены") },
-                    readOnly = true,
-                    enabled = false,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
-                        disabledBorderColor = MaterialTheme.colorScheme.outline,
-                        disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { dropdownExpanded = true }
-                )
+                        .clickable { dropdownExpanded = true },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Тип смены", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = when(shiftType) {
+                                ShiftType.WORK_DAY -> "Рабочий день"
+                                ShiftType.OFF_DAY -> "Выходной день"
+                                ShiftType.ALL -> "Каждый день"
+                            },
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
 
                 DropdownMenu(
                     expanded = dropdownExpanded,
@@ -211,34 +224,59 @@ fun EditAlarmScreen(
         }
     }
 
+    // Диалог выбора времени
     if (showTimePicker) {
-        val timePickerState = rememberTimePickerState(initialHour = hour, initialMinute = minute, is24Hour = true)
+        val timePickerState = rememberTimePickerState(
+            initialHour = hour,
+            initialMinute = minute,
+            is24Hour = true
+        )
         AlertDialog(
             onDismissRequest = { showTimePicker = false },
             confirmButton = {
-                TextButton(onClick = {
-                    hour = timePickerState.hour
-                    minute = timePickerState.minute
-                    showTimePicker = false
-                }) { Text("OK") }
+                TextButton(
+                    onClick = {
+                        hour = timePickerState.hour
+                        minute = timePickerState.minute
+                        showTimePicker = false
+                    }
+                ) {
+                    Text("OK")
+                }
             },
-            dismissButton = { TextButton(onClick = { showTimePicker = false }) { Text("Отмена") } },
+            dismissButton = {
+                TextButton(onClick = { showTimePicker = false }) {
+                    Text("Отмена")
+                }
+            },
             text = { TimePicker(state = timePickerState) }
         )
     }
 
+    // Диалог выбора даты
     if (showDatePicker) {
-        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = selectedDateMillis)
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = selectedDateMillis
+        )
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
-                TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let { selectedDateMillis = it }
-                    showDatePicker = false
-                }) { Text("OK") }
+                TextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { selectedDateMillis = it }
+                        showDatePicker = false
+                    }
+                ) {
+                    Text("OK")
+                }
             },
-            dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("Отмена") } }
-        ) { DatePicker(state = datePickerState)
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Отмена")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
         }
     }
 }

@@ -3,12 +3,18 @@ package com.example.shiftalarm
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Column
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -28,8 +34,24 @@ class MainActivity : ComponentActivity() {
         AlarmRepository.initialize(this)
         AlarmScheduler(this).rescheduleAllAlarms()
 
+        // Создаем фиксированную контрастную темную тему, которую Xiaomi Force Dark не сможет перекрасить
+        val fixedDarkColorScheme = darkColorScheme(
+            primary = Color(0xFFD0BCFF),
+            onPrimary = Color(0xFF381E72),
+            primaryContainer = Color(0xFF4F378B),
+            onPrimaryContainer = Color(0xFFEADDFF),
+            surface = Color(0xFF1C1B1F),
+            onSurface = Color(0xFFE6E1E5),
+            surfaceVariant = Color(0xFF49454F),
+            onSurfaceVariant = Color(0xFFCAC4D0),
+            background = Color(0xFF141218),
+            onBackground = Color(0xFFE6E1E5),
+            outline = Color(0xFF938F99)
+        )
+
         setContent {
-            MaterialTheme {
+            // Применяем нашу пуленепробиваемую темную тему ко всему приложению
+            MaterialTheme(colorScheme = fixedDarkColorScheme) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -51,7 +73,6 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-                        // ИСПРАВЛЕНО: Аккуратный Material 3 экран "О программе" вместо текстовой заглушки
                         composable("about") {
                             Scaffold(
                                 topBar = {
