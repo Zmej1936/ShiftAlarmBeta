@@ -13,17 +13,20 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.example.shiftalarm.data.Alarm
-import com.example.shiftalarm.utils.ShiftCalculator
-import com.example.shiftalarm.viewmodel.AlarmViewModel
+import com.example.shiftalarm.data.AlarmRepository
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AlarmListScreen(navController: NavController, viewModel: AlarmViewModel) {
-    val alarms by viewModel.alarms.collectAsStateWithLifecycle(emptyList())
+fun AlarmListScreen(navController: NavController, viewModel: com.example.shiftalarm.viewmodel.AlarmViewModel) {
+    val context = LocalContext.current
+
+    // ИСПРАВЛЕНО: Подписываем Compose на реактивный StateFlow репозитория
+    val alarmsList by AlarmRepository.alarmsFlow.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -49,11 +52,19 @@ fun AlarmListScreen(navController: NavController, viewModel: AlarmViewModel) {
             contentPadding = PaddingValues(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(alarms) { alarm ->
+            items(alarmsList, key = { it.id }) { alarm ->
                 AlarmCard(
                     alarm = alarm,
-                    onDelete = { viewModel.deleteAlarm(alarm) },
-                    onToggle = { viewModel.updateAlarmEnabled(alarm, !alarm.isEnabled) },
+                    onDelete = {
+                        val updated = alarmsList.filter { it.id != alarm.id }
+                        AlarmRepository.saveAlarms(context, updated)
+                    },
+                    onToggle = {
+                        val updatedAlarm = alarm.copy(isEnabled = !alarm.isEnabled)
+                        // При переключении тумблера планировщик пересчитает дату заново
+                        com.example.shiftalarm.utils.AlarmScheduler(context).scheduleAlarm(updatedAlarm)
+                        AlarmRepository.updateAlarm(context, updatedAlarm)
+                    },
                     onEdit = { navController.navigate("edit_alarm/${alarm.id}") }
                 )
             }
@@ -68,22 +79,6 @@ fun AlarmCard(
     onToggle: () -> Unit,
     onEdit: () -> Unit
 ) {
-    // Передаем alarm.startDate напрямую в калькулятор
-    val nextDateTime = remember(alarm) {
-        ShiftCalculator.getNextAlarmDateTime(
-            alarm.hour,
-            alarm.minute,
-            alarm.shiftType,
-            alarm.shiftCycle,
-            alarm.startDate ?: "2026-05-20" // ИСПРАВЛЕНО
-        )
-    }
-    val nextDateText = if (nextDateTime != null) {
-        ShiftCalculator.formatAlarmDateTime(nextDateTime)
-    } else {
-        "Не определено"
-    }
-
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
@@ -106,12 +101,12 @@ fun AlarmCard(
                     style = MaterialTheme.typography.bodyLarge
                 )
                 Text(
-                    text = "Следующий: $nextDateText",
+                    text = "Следующий: ${alarm.nextTriggerDateTime ?: "Не определено"}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = "Старт: ${alarm.startDate} / Цикл: ${alarm.shiftCycle}",
+                    text = "Старт графика: ${alarm.startDate ?: "2026-05-20"}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

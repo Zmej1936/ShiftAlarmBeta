@@ -3,9 +3,6 @@ package com.example.shiftalarm.receivers
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import com.example.shiftalarm.data.Alarm
 import com.example.shiftalarm.data.ShiftType
@@ -22,46 +19,32 @@ class AlarmReceiver : BroadcastReceiver() {
         val shiftTypeName = intent.getStringExtra("shift_type") ?: "ALL"
         val shiftCycle = intent.getIntExtra("shift_cycle", 2)
         val shiftType = try { ShiftType.valueOf(shiftTypeName) } catch (e: Exception) { ShiftType.ALL }
-
-        // ДОБАВЛЕНО: Извлекаем индивидуальную дату старта графика (или берем дефолтную)
         val startDateStr = intent.getStringExtra("start_date") ?: "2026-05-20"
 
         Log.d("AlarmSched", "===> Ресивер принял триггер для ID: $alarmId ($label)")
 
-        // ИСПРАВЛЕНО: Передаем извлеченную дату старта графика в калькулятор смен
+        // 1. Проверяем, должен ли будильник звенеть сегодня по графику смен
         val shouldRing = ShiftCalculator.shouldAlarmRingToday(shiftType, shiftCycle, startDateStr)
 
-        Log.d("AlarmSched", "Вердикт калькулятора смен (shouldRing): $shouldRing для даты старта $startDateStr")
-
         if (!shouldRing) {
-            Log.d("AlarmSched", "Будильник пропущен, так как сегодня по графику выходной.")
-
-            // Если сегодня выходной, перепланируем будильник дальше с учетом его даты старта
+            Log.d("AlarmSched", "Сегодня выходной. Молча перепланируем на следующий день.")
+            // Если сегодня выходной, просто регистрируем триггер на следующий день в системе
             val alarm = Alarm(alarmId, hour, minute, label, shiftType, shiftCycle, true, startDateStr)
             AlarmScheduler(context).scheduleAlarm(alarm)
             return
         }
 
-        Log.d("AlarmSched", "Запускаем Foreground Service для проигрывания звука...")
-
-        // Запуск Foreground Service для непрерывного воспроизведения звука и показа кнопок
+        // 2. Если сегодня рабочий день — запускаем проигрывание звука
+        Log.d("AlarmSched", "Рабочий день! Включаем звук будильника.")
         val serviceIntent = Intent(context, AlarmSoundService::class.java).apply {
             putExtra("alarm_id", alarmId)
             putExtra("label", label)
         }
+        context.startService(serviceIntent)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(serviceIntent)
-        } else {
-            context.startService(serviceIntent)
-        }
-
-        // ИСПРАВЛЕНО: Перепланируем оригинальный будильник на следующий цикл с микро-задержкой в 5 секунд,
-        // чтобы вызов PendingIntent внутри AlarmScheduler не прерывал инициализацию MediaPlayer в сервисе
-        Handler(Looper.getMainLooper()).postDelayed({
-            val alarm = Alarm(alarmId, hour, minute, label, shiftType, shiftCycle, true, startDateStr)
-            AlarmScheduler(context).scheduleAlarm(alarm)
-            Log.d("AlarmSched", "Будильник ID: $alarmId успешно перепланирован на следующий раз.")
-        }, 5000)
+        // 3. ИСПРАВЛЕНО: Вместо временной задержки Handler, мы просто планируем следующий день.
+        // AlarmManager обновит интент, а UI обновится, когда пользователь нажмет "Отключить".
+        val alarm = Alarm(alarmId, hour, minute, label, shiftType, shiftCycle, true, startDateStr)
+        AlarmScheduler(context).scheduleAlarm(alarm)
     }
 }

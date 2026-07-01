@@ -8,11 +8,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.example.shiftalarm.data.Alarm
+import com.example.shiftalarm.data.AlarmRepository
 import com.example.shiftalarm.data.ShiftType
 import com.example.shiftalarm.utils.AlarmScheduler
 import com.example.shiftalarm.viewmodel.AlarmViewModel
@@ -27,6 +29,7 @@ fun EditAlarmScreen(
     viewModel: AlarmViewModel,
     alarmId: Int
 ) {
+    val context = LocalContext.current
     val alarmState = viewModel.getAlarmById(alarmId).collectAsStateWithLifecycle(initialValue = null)
     val alarm = alarmState.value
 
@@ -36,11 +39,13 @@ fun EditAlarmScreen(
     var shiftType by remember { mutableStateOf(ShiftType.WORK_DAY) }
     var shiftCycle by remember { mutableStateOf(2) }
 
-    // Состояние индивидуальной даты старта
     var selectedDateMillis by remember { mutableStateOf(System.currentTimeMillis()) }
 
     var showTimePicker by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
+
+    // Состояние для открытия выпадающего списка
+    var dropdownExpanded by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
     val formatter = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
@@ -52,11 +57,8 @@ fun EditAlarmScreen(
             minute = it.minute
             shiftType = it.shiftType
             shiftCycle = it.shiftCycle
-
-            // ИСПРАВЛЕНО: Безопасное извлечение с элвис-оператором
-            val dateToParse = it.startDate ?: "2026-05-20"
             try {
-                formatter.parse(dateToParse)?.time?.let { millis ->
+                formatter.parse(it.startDate ?: "2026-05-20")?.time?.let { millis ->
                     selectedDateMillis = millis
                 }
             } catch (e: Exception) {
@@ -81,40 +83,29 @@ fun EditAlarmScreen(
                 scope.launch {
                     val formattedDate = formatter.format(Date(selectedDateMillis))
 
-                    val alarmToSave = if (alarmId == -1) {
-                        Alarm(
-                            id = System.currentTimeMillis().toInt(),
-                            hour = hour,
-                            minute = minute,
-                            label = label,
-                            shiftType = shiftType,
-                            shiftCycle = shiftCycle,
-                            isEnabled = true,
-                            startDate = formattedDate
-                        )
+                    val alarmToSave = Alarm(
+                        id = if (alarmId == -1) System.currentTimeMillis().toInt() else alarmId,
+                        hour = hour,
+                        minute = minute,
+                        label = label,
+                        shiftType = shiftType,
+                        shiftCycle = shiftCycle,
+                        isEnabled = true,
+                        startDate = formattedDate
+                    )
+
+                    val scheduler = AlarmScheduler(context)
+                    scheduler.scheduleAlarm(alarmToSave)
+
+                    val currentAlarms = AlarmRepository.alarmsFlow.value.toMutableList()
+                    if (alarmId == -1) {
+                        currentAlarms.add(alarmToSave)
                     } else {
-                        // ИСПРАВЛЕНО: Безопасное копирование
-                        alarm?.copy(
-                            hour = hour,
-                            minute = minute,
-                            label = label,
-                            shiftType = shiftType,
-                            shiftCycle = shiftCycle,
-                            startDate = formattedDate
-                        ) ?: Alarm(
-                            id = alarmId,
-                            hour = hour,
-                            minute = minute,
-                            label = label,
-                            shiftType = shiftType,
-                            shiftCycle = shiftCycle,
-                            isEnabled = true,
-                            startDate = formattedDate
-                        )
+                        val idx = currentAlarms.indexOfFirst { it.id == alarmId }
+                        if (idx != -1) currentAlarms[idx] = alarmToSave else currentAlarms.add(alarmToSave)
                     }
 
-                    viewModel.insertAlarm(alarmToSave)
-                    AlarmScheduler(navController.context).scheduleAlarm(alarmToSave)
+                    AlarmRepository.saveAlarms(context, currentAlarms)
                     navController.popBackStack()
                 }
             }) {
@@ -152,7 +143,6 @@ fun EditAlarmScreen(
                     .clickable { showTimePicker = true }
             )
 
-            // Поле выбора индивидуальной даты начала графика
             OutlinedTextField(
                 value = formatter.format(Date(selectedDateMillis)),
                 onValueChange = {},
@@ -177,7 +167,47 @@ fun EditAlarmScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Text(text = "Текущий тип смены: ${shiftType.name}", style = MaterialTheme.typography.bodyMedium)
+            // ДОБАВЛЕНО: Красивый выпадающий список для выбора типа смены
+            Box(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = when(shiftType) {
+                        ShiftType.WORK_DAY -> "Рабочий день"
+                        ShiftType.OFF_DAY -> "Выходной день"
+                        ShiftType.ALL -> "Каждый день"
+                    },
+                    onValueChange = {},
+                    label = { Text("Тип смены") },
+                    readOnly = true,
+                    enabled = false,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                        disabledBorderColor = MaterialTheme.colorScheme.outline,
+                        disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { dropdownExpanded = true }
+                )
+
+                DropdownMenu(
+                    expanded = dropdownExpanded,
+                    onDismissRequest = { dropdownExpanded = false },
+                    modifier = Modifier.fillMaxWidth(0.9f)
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Рабочий день") },
+                        onClick = { shiftType = ShiftType.WORK_DAY; dropdownExpanded = false }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Выходной день") },
+                        onClick = { shiftType = ShiftType.OFF_DAY; dropdownExpanded = false }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Каждый день") },
+                        onClick = { shiftType = ShiftType.ALL; dropdownExpanded = false }
+                    )
+                }
+            }
         }
     }
 
@@ -208,6 +238,7 @@ fun EditAlarmScreen(
                 }) { Text("OK") }
             },
             dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("Отмена") } }
-        ) { DatePicker(state = datePickerState) }
+        ) { DatePicker(state = datePickerState)
+        }
     }
 }

@@ -8,7 +8,6 @@ object ShiftCalculator {
 
     private val dbFormatter = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
-    // ИСПРАВЛЕНО: Метод теперь принимает конкретную дату начала графика
     private fun getStartCalendar(startDateStr: String): Calendar {
         val calendar = Calendar.getInstance()
         try {
@@ -26,7 +25,6 @@ object ShiftCalculator {
         }
     }
 
-    // ИСПРАВЛЕНО: Принимает startDateStr
     fun getShiftTypeForDate(year: Int, month: Int, day: Int, shiftCycle: Int, startDateStr: String): ShiftType {
         val calendar = Calendar.getInstance().apply {
             set(year, month - 1, day)
@@ -42,7 +40,6 @@ object ShiftCalculator {
         return if (position < shiftCycle) ShiftType.WORK_DAY else ShiftType.OFF_DAY
     }
 
-    // ИСПРАВЛЕНО: Принимает startDateStr
     fun shouldAlarmRingToday(alarmShiftType: ShiftType, alarmShiftCycle: Int, startDateStr: String): Boolean {
         if (alarmShiftType == ShiftType.ALL) return true
         val today = Calendar.getInstance()
@@ -58,27 +55,38 @@ object ShiftCalculator {
         return kotlin.math.round(diffMillis.toDouble() / (24 * 60 * 60 * 1000)).toInt()
     }
 
-    // ИСПРАВЛЕНО: Принимает startDateStr
+    // ИСПРАВЛЕНО: Безопасный алгоритм линейного поиска без застревания в текущем цикле смен
     fun getNextAlarmDateTime(hour: Int, minute: Int, targetShiftType: ShiftType, shiftCycle: Int, startDateStr: String): Calendar? {
         val now = Calendar.getInstance()
+
+        // Берем за основу текущий день устройства
         val checkDate = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, hour)
             set(Calendar.MINUTE, minute)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
         }
+
+        // Если время будильника на сегодня уже наступило или прошло,
+        // мы ОДИН раз принудительно шагаем на завтрашний день перед проверками.
         if (checkDate.timeInMillis <= now.timeInMillis) {
             checkDate.add(Calendar.DAY_OF_YEAR, 1)
         }
 
-        for (i in 0..60) {
+        // Запускаем последовательное сканирование дней вперед
+        for (i in 0..365) {
             val year = checkDate.get(Calendar.YEAR)
             val month = checkDate.get(Calendar.MONTH) + 1
             val day = checkDate.get(Calendar.DAY_OF_MONTH)
+
             val shiftTypeForDate = getShiftTypeForDate(year, month, day, shiftCycle, startDateStr)
+
+            // Если тип дня полностью совпадает с типом будильника — это то, что мы искали!
             if (targetShiftType == ShiftType.ALL || shiftTypeForDate == targetShiftType) {
                 return checkDate.clone() as Calendar
             }
+
+            // Если день не подошел, шагаем на +1 день вперед и проверяем его на следующей итерации
             checkDate.add(Calendar.DAY_OF_YEAR, 1)
         }
         return null

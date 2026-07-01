@@ -3,7 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.parcelize")
-    id("kotlin-kapt")
+    // ИСПРАВЛЕНО: Строка id("kotlin-kapt") полностью УДАЛЕНА
 }
 
 android {
@@ -20,10 +20,7 @@ android {
 
     buildFeatures {
         compose = true
-    }
-
-    buildFeatures {
-        buildConfig = true   // чтобы использовать BuildConfig
+        buildConfig = true
     }
 
     compileOptions {
@@ -52,4 +49,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.compose.foundation:foundation:1.7.5")
+
+    // ИСПРАВЛЕНО: Все строки implementation room и kapt room compiler полностью УДАЛЕНЫ
 }

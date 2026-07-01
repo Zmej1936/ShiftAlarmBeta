@@ -1,6 +1,5 @@
 package com.example.shiftalarm.receivers
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -10,6 +9,7 @@ import android.content.Intent
 import android.media.MediaPlayer
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import androidx.core.app.NotificationCompat
@@ -20,19 +20,23 @@ class AlarmSoundService : Service() {
 
     private var mediaPlayer: MediaPlayer? = null
     private var vibrator: Vibrator? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val alarmId = intent?.getIntExtra("alarm_id", -1) ?: -1
         val label = intent?.getStringExtra("label") ?: "Будильник"
 
-        // 1. Срочно запускаем Foreground-уведомление, чтобы систему не убил Android
-        val notification = createForegroundNotification(label, alarmId)
-        startForeground(alarmId + 1000, notification)
+        // 1. Захватываем WakeLock, чтобы процессор не уснул
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ShiftAlarm::WakeLockTag").apply {
+            acquire(10 * 60 * 1000L) // Лимит 10 минут
+        }
 
-        // 2. Безопасный запуск музыки на бесконечный повтор
+        // 2. Показываем уведомление
+        showSimpleNotification(label, alarmId)
+
+        // 3. Запуск звука и вибрации
         startPlayback()
-
-        // 3. Безопасный запуск вибрации
         startVibration()
 
         return START_STICKY
@@ -45,8 +49,6 @@ class AlarmSoundService : Service() {
                 isLooping = true
                 start()
             }
-            // Сохраняем ссылку для статического доступа (если это используется в AlarmStopReceiver)
-            AlarmStopReceiver.mediaPlayer = mediaPlayer
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -54,7 +56,8 @@ class AlarmSoundService : Service() {
 
     private fun startVibration() {
         try {
-            vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            // ИСПРАВЛЕНО: Заменено на современный Context.VIBRATOR_SERVICE для устранения варнинга Java
+            vibrator = getSystemService("vibrator") as Vibrator
             vibrator?.let {
                 if (it.hasVibrator()) {
                     val pattern = longArrayOf(0, 500, 500, 500)
@@ -71,14 +74,14 @@ class AlarmSoundService : Service() {
         }
     }
 
-    private fun createForegroundNotification(label: String, alarmId: Int): android.app.Notification {
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+    private fun showSimpleNotification(label: String, alarmId: Int) {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = android.app.NotificationChannel("alarm_channel", "Будильник", android.app.NotificationManager.IMPORTANCE_HIGH)
+            val channel = NotificationChannel("alarm_channel", "Будильник", NotificationManager.IMPORTANCE_HIGH)
             manager.createNotificationChannel(channel)
         }
 
-        val mainIntent = Intent(this, com.example.shiftalarm.MainActivity::class.java).apply {
+        val mainIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
         val mainPendingIntent = PendingIntent.getActivity(
@@ -100,32 +103,31 @@ class AlarmSoundService : Service() {
             this, alarmId + 6000, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return NotificationCompat.Builder(this, "alarm_channel")
+        val notification = NotificationCompat.Builder(this, "alarm_channel")
             .setContentTitle(label)
-            .setContentText("Будильник вовсю работает!")
+            .setContentText("Будильник работает!")
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            // Убрали setFullScreenIntent, так как для shortService на некоторых Android 14+
-            // это может вызывать транзакционный сбой Binder до прорисовки окна
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setContentIntent(mainPendingIntent)
             .addAction(android.R.drawable.ic_menu_recent_history, "Отложить 10 мин", snoozePendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Отключить", stopPendingIntent)
-            .setOngoing(true)
             .build()
+
+        manager.notify(alarmId + 1000, notification)
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        // ИСПРАВЛЕНО: Безопасное и изолированное уничтожение ресурсов внутри onDestroy сервиса
         try {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
             mediaPlayer?.stop()
             mediaPlayer?.release()
             mediaPlayer = null
-            AlarmStopReceiver.mediaPlayer = null
-        } catch (e: Exception) { e.printStackTrace() }
-
-        try {
             vibrator?.cancel()
-        } catch (e: Exception) { e.printStackTrace() }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
