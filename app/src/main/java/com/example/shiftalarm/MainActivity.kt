@@ -1,11 +1,15 @@
 package com.example.shiftalarm
 
+import android.app.DownloadManager
 import android.app.NotificationManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -21,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -37,10 +42,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
 
     private var isAlarmActive by mutableStateOf(false)
@@ -48,7 +55,6 @@ class MainActivity : ComponentActivity() {
     private var activeAlarmLabel by mutableStateOf("Будильник смен")
     private var activeAlarmTime by mutableStateOf("08:00")
 
-    @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
@@ -75,23 +81,21 @@ class MainActivity : ComponentActivity() {
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (!notificationManager.canUseFullScreenIntent()) {
                 val intent = Intent(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
-                    data = Uri.fromParts("package", packageName, null)
+                    data = Uri.parse("package:$packageName")
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 startActivity(intent)
             }
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (!android.provider.Settings.canDrawOverlays(this)) {
-                val overlayIntent = Intent(
-                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")
-                ).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                startActivity(overlayIntent)
+        if (!android.provider.Settings.canDrawOverlays(this)) {
+            val overlayIntent = Intent(
+                android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            ).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
+            startActivity(overlayIntent)
         }
 
         val fixedDarkColorScheme = darkColorScheme(
@@ -117,7 +121,6 @@ class MainActivity : ComponentActivity() {
                     if (isAlarmActive) {
                         FullScreenAlarmScreen(
                             label = activeAlarmLabel,
-                            timeText = activeAlarmTime,
                             onStopClick = {
                                 val serviceIntent = Intent(this@MainActivity, AlarmSoundService::class.java)
                                 stopService(serviceIntent)
@@ -152,57 +155,57 @@ class MainActivity : ComponentActivity() {
                                 val alarmId = backStackEntry.arguments?.getString("alarmId")?.toIntOrNull() ?: -1
                                 EditAlarmScreen(navController = navController, viewModel = alarmViewModel, alarmId = alarmId)
                             }
+
                             composable("about") {
                                 val scope = rememberCoroutineScope()
                                 val currentContext = LocalContext.current
 
-                                var showUpdateDialog by remember { mutableStateOf(false) }
-                                var updateUrl by remember { mutableStateOf("") }
+                                var isUpdateAvailable by remember { mutableStateOf(false) }
                                 var serverVersionName by remember { mutableStateOf("") }
 
                                 LaunchedEffect(Unit) {
                                     scope.launch(Dispatchers.IO) {
                                         try {
-                                            // Ссылка снова чистая и безопасная для Android
-                                            val url = URL("https://githubusercontent.com")
-
+                                            val url = URL("https://api.github.com/repos/Zmej1936/ShiftAlarmBeta/contents/version.json")
                                             val connection = url.openConnection() as HttpURLConnection
                                             connection.requestMethod = "GET"
-
-                                            // ИСПРАВЛЕНО: Сбрасываем кэш сервера через стандартные HTTP-заголовки
-                                            connection.setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate")
-                                            connection.setRequestProperty("Pragma", "no-cache")
-                                            connection.setRequestProperty("Expires", "0")
-
-                                            connection.useCaches = false
+                                            connection.setRequestProperty("User-Agent", "ShiftAlarm-App")
                                             connection.connectTimeout = 5000
                                             connection.readTimeout = 5000
 
                                             val jsonText = connection.inputStream.bufferedReader().use { it.readText() }
-                                            android.util.Log.d("AlarmUpdate", "Ответ сервера: $jsonText")
+                                            val responseJson = JSONObject(jsonText)
 
-                                            val json = JSONObject(jsonText)
+                                            val base64Content = responseJson.getString("content")
+                                                .replace("\n", "")
+                                                .replace(" ", "")
+                                            val decodedBytes = android.util.Base64.decode(base64Content, android.util.Base64.DEFAULT)
+                                            val rawJsonText = String(decodedBytes, Charsets.UTF_8)
+
+                                            val json = JSONObject(rawJsonText)
                                             val serverVersionCode = json.getInt("versionCode")
                                             serverVersionName = json.getString("versionName")
-                                            updateUrl = json.getString("downloadUrl")
 
                                             val currentVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                                                currentContext.packageManager.getPackageInfo(currentContext.packageName, 0).longVersionCode.toInt()
+                                                currentContext.packageManager.getPackageInfo(
+                                                    currentContext.packageName,
+                                                    0
+                                                ).longVersionCode.toInt()
                                             } else {
                                                 @Suppress("DEPRECATION")
-                                                currentContext.packageManager.getPackageInfo(currentContext.packageName, 0).versionCode
+                                                currentContext.packageManager.getPackageInfo(
+                                                    currentContext.packageName,
+                                                    0
+                                                ).versionCode
                                             }
 
                                             if (serverVersionCode > currentVersionCode) {
                                                 withContext(Dispatchers.Main) {
-                                                    showUpdateDialog = true
+                                                    isUpdateAvailable = true
                                                 }
                                             }
                                         } catch (e: Exception) {
-                                            android.util.Log.e("AlarmUpdate", "Ошибка: ${e.message}", e)
-                                            withContext(Dispatchers.Main) {
-                                                android.widget.Toast.makeText(currentContext, "Сбой сети: ${e.javaClass.simpleName}", android.widget.Toast.LENGTH_LONG).show()
-                                            }
+                                            e.printStackTrace()
                                         }
                                     }
                                 }
@@ -219,27 +222,34 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                 ) { padding ->
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .padding(padding),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            modifier = Modifier.padding(16.dp)
+                                        ) {
                                             Text(text = "Shift Alarm", style = MaterialTheme.typography.headlineMedium)
                                             Spacer(modifier = Modifier.height(8.dp))
-                                            Text(
-                                                text = "Умный будильник для сменных графиков",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                            Text(text = "Умный будильник для сменных графиков", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                             Spacer(modifier = Modifier.height(16.dp))
-                                            Text(
-                                                text = "Версия приложения: ${BuildConfig.VERSION_NAME}",
-                                                style = MaterialTheme.typography.labelLarge,
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
+                                            Text(text = "Версия приложения: ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+
                                             Spacer(modifier = Modifier.height(48.dp))
+
+                                            if (isUpdateAvailable) {
+                                                Button(
+                                                    onClick = {
+                                                        // Ссылка на последний релиз с APK (имя файла должно совпадать с загруженным в релиз)
+                                                        val apkUrl = "https://github.com/Zmej1936/ShiftAlarmBeta/releases/latest/download/app-debug.apk"
+                                                        downloadAndInstall(currentContext, apkUrl)
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                                                    modifier = Modifier.fillMaxWidth(0.7f).height(50.dp)
+                                                ) {
+                                                    Text("ОБНОВИТЬ ДО $serverVersionName 🔄", fontSize = 16.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                                }
+                                                Spacer(modifier = Modifier.height(16.dp))
+                                            }
+
                                             Button(
                                                 onClick = {
                                                     val donateIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -248,38 +258,12 @@ class MainActivity : ComponentActivity() {
                                                     currentContext.startActivity(donateIntent)
                                                 },
                                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00A86B)),
-                                                modifier = Modifier
-                                                    .fillMaxWidth(0.7f)
-                                                    .height(50.dp)
+                                                modifier = Modifier.fillMaxWidth(0.7f).height(50.dp)
                                             ) {
                                                 Text("ПОДДЕРЖАТЬ АВТОРА ☕", fontSize = 16.sp, color = Color.White)
                                             }
                                         }
                                     }
-                                }
-
-                                if (showUpdateDialog) {
-                                    AlertDialog(
-                                        onDismissRequest = { showUpdateDialog = false },
-                                        title = { Text("Доступно автообновление!") },
-                                        text = { Text("На GitHub вышла новая версия $serverVersionName. Хотите скачать и обновить приложение?") },
-                                        confirmButton = {
-                                            TextButton(
-                                                onClick = {
-                                                    showUpdateDialog = false
-                                                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(updateUrl))
-                                                    currentContext.startActivity(browserIntent)
-                                                }
-                                            ) {
-                                                Text("ОБНОВИТЬ")
-                                            }
-                                        },
-                                        dismissButton = {
-                                            TextButton(onClick = { showUpdateDialog = false }) {
-                                                Text("ПОЗЖЕ")
-                                            }
-                                        }
-                                    )
                                 }
                             }
                         }
@@ -306,65 +290,111 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable
-    fun FullScreenAlarmScreen(
-        label: String,
-        timeText: String,
-        onStopClick: () -> Unit,
-        onSnoozeClick: () -> Unit
-    ) {
-        var currentTimeText by remember {
-            mutableStateOf(java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date()))
-        }
-        LaunchedEffect(Unit) {
-            while (true) {
-                currentTimeText = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date())
-                kotlinx.coroutines.delay(1000)
+    /**
+     * Скачивание APK через DownloadManager и автоматическая установка.
+     * Используется ссылка на последний релиз GitHub.
+     */
+    private fun downloadAndInstall(context: Context, apkUrl: String) {
+        val fileName = "app-update.apk"
+        val destination = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            fileName
+        )
+
+        if (destination.exists()) destination.delete()
+
+        val request = DownloadManager.Request(Uri.parse(apkUrl))
+            .setTitle("Загрузка обновления")
+            .setDescription("Загружается новая версия Shift Alarm")
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDestinationUri(Uri.fromFile(destination))
+            .setMimeType("application/vnd.android.package-archive")
+
+        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val downloadId = downloadManager.enqueue(request)
+
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val id = intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1) ?: -1
+                if (id == downloadId) {
+                    val uri = FileProvider.getUriForFile(
+                        context!!,
+                        "${context.packageName}.fileprovider",
+                        destination
+                    )
+                    val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, "application/vnd.android.package-archive")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(installIntent)
+                    context.unregisterReceiver(this)
+                }
             }
         }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(32.dp),
-            contentAlignment = Alignment.Center
+        context.registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FullScreenAlarmScreen(
+    label: String,
+    onStopClick: () -> Unit,
+    onSnoozeClick: () -> Unit
+) {
+    var currentTimeText by remember {
+        mutableStateOf(java.text.SimpleDateFormat("HH:mm", Locale.US).format(java.util.Date()))
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            currentTimeText = java.text.SimpleDateFormat("HH:mm", Locale.US).format(java.util.Date())
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-                modifier = Modifier.fillMaxWidth()
+            Text(
+                text = currentTimeText,
+                fontSize = 72.sp,
+                style = MaterialTheme.typography.headlineLarge,
+                color = Color.White
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = label,
+                fontSize = 24.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(64.dp))
+            Button(
+                onClick = onStopClick,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBA1A1A)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp)
             ) {
-                Text(
-                    text = currentTimeText,
-                    fontSize = 72.sp,
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = Color.White
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = label,
-                    fontSize = 24.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(64.dp))
-                Button(
-                    onClick = onStopClick,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBA1A1A)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp)
-                ) {
-                    Text("ОТКЛЮЧИТЬ", fontSize = 18.sp, color = Color.White)
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-                OutlinedButton(
-                    onClick = onSnoozeClick,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                ) {
-                    Text("ОТЛОЖИТЬ 10 МИН", fontSize = 16.sp, color = Color.White)
-                }
+                Text("ОТКЛЮЧИТЬ", fontSize = 18.sp, color = Color.White)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            OutlinedButton(
+                onClick = onSnoozeClick,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+            ) {
+                Text("ОТЛОЖИТЬ 10 МИН", fontSize = 16.sp, color = Color.White)
             }
         }
     }
