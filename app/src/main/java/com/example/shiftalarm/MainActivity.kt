@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -32,13 +33,18 @@ import com.example.shiftalarm.screens.AlarmListScreen
 import com.example.shiftalarm.screens.EditAlarmScreen
 import com.example.shiftalarm.utils.AlarmScheduler
 import com.example.shiftalarm.viewmodel.AlarmViewModel
-import com.example.shiftalarm.BuildConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
     private var isAlarmActive by mutableStateOf(false)
-    private var activeAlarmId by mutableIntStateOf(-1) // Исправлено на строгое типизированное состояние
+    private var activeAlarmId by mutableIntStateOf(-1)
     private var activeAlarmLabel by mutableStateOf("Будильник смен")
     private var activeAlarmTime by mutableStateOf("08:00")
 
@@ -113,29 +119,23 @@ class MainActivity : ComponentActivity() {
                             label = activeAlarmLabel,
                             timeText = activeAlarmTime,
                             onStopClick = {
-                                // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Гарантированно глушим музыку и службу звука ПРЯМЫМ методом
                                 val serviceIntent = Intent(this@MainActivity, AlarmSoundService::class.java)
                                 stopService(serviceIntent)
-
-                                // Передаем ТОЧНЫЙ id будильника в ресивер обновления графиков дат
                                 val stopIntent = Intent(this@MainActivity, AlarmStopReceiver::class.java).apply {
                                     putExtra("alarm_id", activeAlarmId)
                                 }
                                 sendBroadcast(stopIntent)
-
                                 isAlarmActive = false
                                 finish()
                             },
                             onSnoozeClick = {
                                 val serviceIntent = Intent(this@MainActivity, AlarmSoundService::class.java)
                                 stopService(serviceIntent)
-
                                 val snoozeIntent = Intent(this@MainActivity, SnoozeReceiver::class.java).apply {
                                     putExtra("alarm_id", activeAlarmId)
                                     putExtra("label", activeAlarmLabel)
                                 }
                                 sendBroadcast(snoozeIntent)
-
                                 isAlarmActive = false
                                 finish()
                             }
@@ -153,6 +153,60 @@ class MainActivity : ComponentActivity() {
                                 EditAlarmScreen(navController = navController, viewModel = alarmViewModel, alarmId = alarmId)
                             }
                             composable("about") {
+                                val scope = rememberCoroutineScope()
+                                val currentContext = LocalContext.current
+
+                                var showUpdateDialog by remember { mutableStateOf(false) }
+                                var updateUrl by remember { mutableStateOf("") }
+                                var serverVersionName by remember { mutableStateOf("") }
+
+                                LaunchedEffect(Unit) {
+                                    scope.launch(Dispatchers.IO) {
+                                        try {
+                                            // Ссылка снова чистая и безопасная для Android
+                                            val url = URL("https://githubusercontent.com")
+
+                                            val connection = url.openConnection() as HttpURLConnection
+                                            connection.requestMethod = "GET"
+
+                                            // ИСПРАВЛЕНО: Сбрасываем кэш сервера через стандартные HTTP-заголовки
+                                            connection.setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate")
+                                            connection.setRequestProperty("Pragma", "no-cache")
+                                            connection.setRequestProperty("Expires", "0")
+
+                                            connection.useCaches = false
+                                            connection.connectTimeout = 5000
+                                            connection.readTimeout = 5000
+
+                                            val jsonText = connection.inputStream.bufferedReader().use { it.readText() }
+                                            android.util.Log.d("AlarmUpdate", "Ответ сервера: $jsonText")
+
+                                            val json = JSONObject(jsonText)
+                                            val serverVersionCode = json.getInt("versionCode")
+                                            serverVersionName = json.getString("versionName")
+                                            updateUrl = json.getString("downloadUrl")
+
+                                            val currentVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                                currentContext.packageManager.getPackageInfo(currentContext.packageName, 0).longVersionCode.toInt()
+                                            } else {
+                                                @Suppress("DEPRECATION")
+                                                currentContext.packageManager.getPackageInfo(currentContext.packageName, 0).versionCode
+                                            }
+
+                                            if (serverVersionCode > currentVersionCode) {
+                                                withContext(Dispatchers.Main) {
+                                                    showUpdateDialog = true
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("AlarmUpdate", "Ошибка: ${e.message}", e)
+                                            withContext(Dispatchers.Main) {
+                                                android.widget.Toast.makeText(currentContext, "Сбой сети: ${e.javaClass.simpleName}", android.widget.Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    }
+                                }
+
                                 Scaffold(
                                     topBar = {
                                         TopAppBar(
@@ -165,15 +219,67 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                 ) { padding ->
-                                    Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(padding),
+                                        contentAlignment = Alignment.Center
+                                    ) {
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                             Text(text = "Shift Alarm", style = MaterialTheme.typography.headlineMedium)
                                             Spacer(modifier = Modifier.height(8.dp))
-                                            Text(text = "Умный будильник для сменных графиков", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text(
+                                                text = "Умный будильник для сменных графиков",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
                                             Spacer(modifier = Modifier.height(16.dp))
-                                            Text(text = "Версия: ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                                            Text(
+                                                text = "Версия приложения: ${BuildConfig.VERSION_NAME}",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            Spacer(modifier = Modifier.height(48.dp))
+                                            Button(
+                                                onClick = {
+                                                    val donateIntent = Intent(Intent.ACTION_VIEW).apply {
+                                                        data = Uri.parse("https://www.donationalerts.com/r/zmej1936")
+                                                    }
+                                                    currentContext.startActivity(donateIntent)
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00A86B)),
+                                                modifier = Modifier
+                                                    .fillMaxWidth(0.7f)
+                                                    .height(50.dp)
+                                            ) {
+                                                Text("ПОДДЕРЖАТЬ АВТОРА ☕", fontSize = 16.sp, color = Color.White)
+                                            }
                                         }
                                     }
+                                }
+
+                                if (showUpdateDialog) {
+                                    AlertDialog(
+                                        onDismissRequest = { showUpdateDialog = false },
+                                        title = { Text("Доступно автообновление!") },
+                                        text = { Text("На GitHub вышла новая версия $serverVersionName. Хотите скачать и обновить приложение?") },
+                                        confirmButton = {
+                                            TextButton(
+                                                onClick = {
+                                                    showUpdateDialog = false
+                                                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(updateUrl))
+                                                    currentContext.startActivity(browserIntent)
+                                                }
+                                            ) {
+                                                Text("ОБНОВИТЬ")
+                                            }
+                                        },
+                                        dismissButton = {
+                                            TextButton(onClick = { showUpdateDialog = false }) {
+                                                Text("ПОЗЖЕ")
+                                            }
+                                        }
+                                    )
                                 }
                             }
                         }
@@ -199,66 +305,66 @@ class MainActivity : ComponentActivity() {
             isAlarmActive = true
         }
     }
-}
 
-@Composable
-fun FullScreenAlarmScreen(
-    label: String,
-    timeText: String, // Исходное время будильника (можно использовать как подстрочный текст, если нужно)
-    onStopClick: () -> Unit,
-    onSnoozeClick: () -> Unit
-) {
-    // ИСПРАВЛЕНО: Создаем реактивное состояние для отображения ТЕКУЩЕГО времени устройства
-    var currentTimeText by remember {
-        mutableStateOf(java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date()))
-    }
-
-    // Запускаем бесконечный фоновый таймер, который обновляет часы каждую секунду
-    LaunchedEffect(Unit) {
-        while (true) {
-            currentTimeText = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date())
-            kotlinx.coroutines.delay(1000) // Пауза 1 секунда перед следующим обновлением
-        }
-    }
-
-    Box(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
-        contentAlignment = Alignment.Center
+    @Composable
+    fun FullScreenAlarmScreen(
+        label: String,
+        timeText: String,
+        onStopClick: () -> Unit,
+        onSnoozeClick: () -> Unit
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            // ОТОБРАЖАЕМ СТРОГО ТЕКУЩЕЕ ЖИВОЕ ВРЕМЯ УСТРОЙСТВА С БОЛЬШИМ ШРИФТОМ
-            Text(
-                text = currentTimeText,
-                fontSize = 72.sp,
-                style = MaterialTheme.typography.headlineLarge,
-                color = Color.White
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            // Название будильника или статус смены (например, "Отложенный")
-            Text(
-                text = label,
-                fontSize = 24.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(64.dp))
-            Button(
-                onClick = onStopClick,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBA1A1A)),
-                modifier = Modifier.fillMaxWidth().height(60.dp)
-            ) {
-                Text("ОТКЛЮЧИТЬ", fontSize = 18.sp, color = Color.White)
+        var currentTimeText by remember {
+            mutableStateOf(java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date()))
+        }
+        LaunchedEffect(Unit) {
+            while (true) {
+                currentTimeText = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date())
+                kotlinx.coroutines.delay(1000)
             }
-            Spacer(modifier = Modifier.height(16.dp))
-            OutlinedButton(
-                onClick = onSnoozeClick,
-                modifier = Modifier.fillMaxWidth().height(60.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text("ОТЛОЖИТЬ 10 МИН", fontSize = 16.sp, color = Color.White)
+                Text(
+                    text = currentTimeText,
+                    fontSize = 72.sp,
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = Color.White
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = label,
+                    fontSize = 24.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(64.dp))
+                Button(
+                    onClick = onStopClick,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBA1A1A)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp)
+                ) {
+                    Text("ОТКЛЮЧИТЬ", fontSize = 18.sp, color = Color.White)
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = onSnoozeClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
+                    Text("ОТЛОЖИТЬ 10 МИН", fontSize = 16.sp, color = Color.White)
+                }
             }
         }
     }
