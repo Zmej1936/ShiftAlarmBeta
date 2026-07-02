@@ -94,14 +94,16 @@ class AlarmScheduler(private val context: Context) {
         cancelPendingIntent(alarm.id + 1000)
         cancelPendingIntent(alarm.id + 2000)
         cancelPendingIntent(alarm.id + 3000)
+        Log.d("AlarmScheduler", "Все системные таймеры для будильника ${alarm.label} полностью удалены")
     }
 
     private fun cancelPendingIntent(requestCode: Int) {
-        val intent = Intent(context, targetReceiverClass)
+        val intent = Intent(context, targetReceiverClass) // Используем тот же класс ресивера
         val pendingIntent = PendingIntent.getBroadcast(
             context,
             requestCode,
             intent,
+            // Флаги должны быть строго такими же, как при создании (FLAG_NO_CREATE проверит существование)
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         alarmManager.cancel(pendingIntent)

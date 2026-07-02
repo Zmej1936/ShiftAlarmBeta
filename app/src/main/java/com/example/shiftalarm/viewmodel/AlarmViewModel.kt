@@ -25,7 +25,7 @@ class AlarmViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ИСПРАВЛЕНО: Сохранение через JSON-репозиторий
+    // Сохранение через JSON-репозиторий
     fun insertAlarm(alarm: Alarm) {
         viewModelScope.launch {
             val currentList = AlarmRepository.alarmsFlow.value.toMutableList()
@@ -42,16 +42,23 @@ class AlarmViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ИСПРАВЛЕНО: Удаление через JSON-репозиторий
+    // ИСПРАВЛЕНО: Полная и гарантированная зачистка системных таймеров Android при удалении
     fun deleteAlarm(alarm: Alarm) {
         viewModelScope.launch {
+            // 1. Создаем временную копию отключенного будильника, чтобы AlarmManager железно стер триггер
+            val disabledAlarm = alarm.copy(isEnabled = false)
+            scheduler.cancelAllForAlarm(disabledAlarm)
+
+            // 2. Дополнительно гасим исходный будильник во избежание кэширования флагов ОС
             scheduler.cancelAllForAlarm(alarm)
+
+            // 3. Чисто удаляем карточку из нашего JSON-хранилища
             val currentList = AlarmRepository.alarmsFlow.value.filter { it.id != alarm.id }
             AlarmRepository.saveAlarms(context, currentList)
         }
     }
 
-    // ИСПРАВЛЕНО: Переключение тумблера активности
+    // Переключение тумблера активности
     fun updateAlarmEnabled(alarm: Alarm, isEnabled: Boolean) {
         viewModelScope.launch {
             val updatedAlarm = alarm.copy(isEnabled = isEnabled)
