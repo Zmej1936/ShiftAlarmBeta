@@ -4,6 +4,7 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.util.Log
 import com.example.shiftalarm.data.Alarm
@@ -15,8 +16,6 @@ class AlarmScheduler(private val context: Context) {
 
     private val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
-    // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Находим класс ресивера динамически по имени пакета.
-    // Это исключает любые ошибки компиляции "Unresolved reference 'AlarmReceiver'".
     private val targetReceiverClass: Class<*> by lazy {
         try {
             Class.forName("com.example.shiftalarm.receivers.AlarmReceiver")
@@ -32,6 +31,7 @@ class AlarmScheduler(private val context: Context) {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // ИСПРАВЛЕНО: Удалено лишнее слово Schedule в названии метода
             if (!alarmManager.canScheduleExactAlarms()) {
                 Log.e("AlarmScheduler", "Нет разрешения на точные будильники!")
                 return
@@ -44,8 +44,8 @@ class AlarmScheduler(private val context: Context) {
             return
         }
 
-        // Используем динамически найденный класс вместо прямого импорта
         val intent = Intent(context, targetReceiverClass).apply {
+            data = Uri.parse("alarm://${alarm.id}")
             putExtra("alarm_id", alarm.id)
             putExtra("hour", alarm.hour)
             putExtra("minute", alarm.minute)
@@ -79,35 +79,50 @@ class AlarmScheduler(private val context: Context) {
 
     fun rescheduleAllAlarms() {
         val storage = AlarmStorage(context)
-        val alarms = storage.getAlarms()
-        Log.d("AlarmScheduler", "Запущено фоновое обновление лимитов для ${alarms.size} будильников")
-        alarms.forEach { alarm ->
+        val activeAlarms = storage.getAlarms()
+
+        Log.d("AlarmScheduler", "Фоновое обновление. Активных в JSON: ${activeAlarms.size}")
+
+        activeAlarms.forEach { alarm ->
             if (alarm.isEnabled) {
                 scheduleAlarm(alarm, forceNextDay = false)
-                storage.updateAlarm(alarm)
+            } else {
+                cancelAllForAlarm(alarm)
             }
         }
     }
 
     fun cancelAllForAlarm(alarm: Alarm) {
-        cancelPendingIntent(alarm.id)
-        cancelPendingIntent(alarm.id + 1000)
-        cancelPendingIntent(alarm.id + 2000)
-        cancelPendingIntent(alarm.id + 3000)
-        Log.d("AlarmScheduler", "Все системные таймеры для будильника ${alarm.label} полностью удалены")
+        cancelPendingIntent(alarm, alarm.id)
+        cancelPendingIntent(alarm, alarm.id + 1000)
+        cancelPendingIntent(alarm, alarm.id + 5000)
+        Log.d("AlarmScheduler", "===> Системный AlarmManager ТОТАЛЬНО ВЫЖЕГ таймеры для ID: ${alarm.id}")
     }
 
-    private fun cancelPendingIntent(requestCode: Int) {
-        val intent = Intent(context, targetReceiverClass) // Используем тот же класс ресивера
+    private fun cancelPendingIntent(alarm: Alarm, requestCode: Int) {
+        val intent = Intent(context, targetReceiverClass).apply {
+            data = Uri.parse("alarm://${alarm.id}")
+            putExtra("alarm_id", alarm.id)
+            putExtra("hour", alarm.hour)
+            putExtra("minute", alarm.minute)
+            putExtra("label", alarm.label)
+            putExtra("shift_type", alarm.shiftType.name)
+            putExtra("shift_cycle", alarm.shiftCycle)
+            putExtra("start_date", alarm.startDate ?: "2026-05-20")
+        }
+
         val pendingIntent = PendingIntent.getBroadcast(
             context,
             requestCode,
             intent,
-            // Флаги должны быть строго такими же, как при создании (FLAG_NO_CREATE проверит существование)
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        alarmManager.cancel(pendingIntent)
-        pendingIntent.cancel()
+
+        if (pendingIntent != null) {
+            alarmManager.cancel(pendingIntent)
+            pendingIntent.cancel()
+            Log.d("AlarmScheduler", "Уничтожен системный PendingIntent для кода: $requestCode")
+        }
     }
 
     private fun findNextValidTriggerTime(alarm: Alarm, forceNextDay: Boolean): Long? {

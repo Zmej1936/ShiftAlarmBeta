@@ -1,15 +1,11 @@
 package com.example.shiftalarm
 
-import android.app.DownloadManager
 import android.app.NotificationManager
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -25,7 +21,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -42,7 +37,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
@@ -129,7 +123,6 @@ class MainActivity : ComponentActivity() {
                                 }
                                 sendBroadcast(stopIntent)
                                 isAlarmActive = false
-                                finish()
                             },
                             onSnoozeClick = {
                                 val serviceIntent = Intent(this@MainActivity, AlarmSoundService::class.java)
@@ -140,7 +133,6 @@ class MainActivity : ComponentActivity() {
                                 }
                                 sendBroadcast(snoozeIntent)
                                 isAlarmActive = false
-                                finish()
                             }
                         )
                     } else {
@@ -166,19 +158,20 @@ class MainActivity : ComponentActivity() {
                                 LaunchedEffect(Unit) {
                                     scope.launch(Dispatchers.IO) {
                                         try {
+                                            // ✅ ПРАВИЛЬНЫЙ URL для API GitHub
                                             val url = URL("https://api.github.com/repos/Zmej1936/ShiftAlarmBeta/contents/version.json")
                                             val connection = url.openConnection() as HttpURLConnection
                                             connection.requestMethod = "GET"
                                             connection.setRequestProperty("User-Agent", "ShiftAlarm-App")
+                                            // ✅ Добавляем заголовок Accept для корректного ответа от API
+                                            connection.setRequestProperty("Accept", "application/vnd.github.v3+json")
                                             connection.connectTimeout = 5000
                                             connection.readTimeout = 5000
 
                                             val jsonText = connection.inputStream.bufferedReader().use { it.readText() }
                                             val responseJson = JSONObject(jsonText)
 
-                                            val base64Content = responseJson.getString("content")
-                                                .replace("\n", "")
-                                                .replace(" ", "")
+                                            val base64Content = responseJson.getString("content").replace("\n", "").replace(" ", "")
                                             val decodedBytes = android.util.Base64.decode(base64Content, android.util.Base64.DEFAULT)
                                             val rawJsonText = String(decodedBytes, Charsets.UTF_8)
 
@@ -187,16 +180,10 @@ class MainActivity : ComponentActivity() {
                                             serverVersionName = json.getString("versionName")
 
                                             val currentVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                                                currentContext.packageManager.getPackageInfo(
-                                                    currentContext.packageName,
-                                                    0
-                                                ).longVersionCode.toInt()
+                                                currentContext.packageManager.getPackageInfo(currentContext.packageName, 0).longVersionCode.toInt()
                                             } else {
                                                 @Suppress("DEPRECATION")
-                                                currentContext.packageManager.getPackageInfo(
-                                                    currentContext.packageName,
-                                                    0
-                                                ).versionCode
+                                                currentContext.packageManager.getPackageInfo(currentContext.packageName, 0).versionCode
                                             }
 
                                             if (serverVersionCode > currentVersionCode) {
@@ -222,30 +209,52 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                 ) { padding ->
-                                    Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(padding),
+                                        contentAlignment = Alignment.Center
+                                    ) {
                                         Column(
                                             horizontalAlignment = Alignment.CenterHorizontally,
                                             modifier = Modifier.padding(16.dp)
                                         ) {
                                             Text(text = "Shift Alarm", style = MaterialTheme.typography.headlineMedium)
                                             Spacer(modifier = Modifier.height(8.dp))
-                                            Text(text = "Умный будильник для сменных графиков", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text(
+                                                text = "Умный будильник для сменных графиков",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
                                             Spacer(modifier = Modifier.height(16.dp))
-                                            Text(text = "Версия приложения: ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-
+                                            Text(
+                                                text = "Версия приложения: ${BuildConfig.VERSION_NAME}",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
                                             Spacer(modifier = Modifier.height(48.dp))
 
                                             if (isUpdateAvailable) {
                                                 Button(
                                                     onClick = {
-                                                        // Ссылка на последний релиз с APK (имя файла должно совпадать с загруженным в релиз)
-                                                        val apkUrl = "https://github.com/Zmej1936/ShiftAlarmBeta/releases/latest/download/app-debug.apk"
-                                                        downloadAndInstall(currentContext, apkUrl)
+                                                        val updateIntent = Intent(Intent.ACTION_VIEW).apply {
+                                                            // ✅ ПРЯМАЯ ССЫЛКА НА APK ИЗ ПОСЛЕДНЕГО РЕЛИЗА
+                                                            data = Uri.parse("https://github.com/Zmej1936/ShiftAlarmBeta/releases/latest/download/app-debug.apk")
+                                                        }
+                                                        currentContext.startActivity(updateIntent)
                                                     },
-                                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                                                    modifier = Modifier.fillMaxWidth(0.7f).height(50.dp)
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                                                    ),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth(0.7f)
+                                                        .height(50.dp)
                                                 ) {
-                                                    Text("ОБНОВИТЬ ДО $serverVersionName 🔄", fontSize = 16.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                                    Text(
+                                                        "ОБНОВИТЬ ДО $serverVersionName 🔄",
+                                                        fontSize = 16.sp,
+                                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                                    )
                                                 }
                                                 Spacer(modifier = Modifier.height(16.dp))
                                             }
@@ -253,14 +262,21 @@ class MainActivity : ComponentActivity() {
                                             Button(
                                                 onClick = {
                                                     val donateIntent = Intent(Intent.ACTION_VIEW).apply {
+                                                        // ✅ ПРАВИЛЬНАЯ ССЫЛКА НА DONATIONALERTS
                                                         data = Uri.parse("https://www.donationalerts.com/r/zmej1936")
                                                     }
                                                     currentContext.startActivity(donateIntent)
                                                 },
                                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00A86B)),
-                                                modifier = Modifier.fillMaxWidth(0.7f).height(50.dp)
+                                                modifier = Modifier
+                                                    .fillMaxWidth(0.7f)
+                                                    .height(50.dp)
                                             ) {
-                                                Text("ПОДДЕРЖАТЬ АВТОРА ☕", fontSize = 16.sp, color = Color.White)
+                                                Text(
+                                                    "ПОДДЕРЖАТЬ АВТОРА ☕",
+                                                    fontSize = 16.sp,
+                                                    color = Color.White
+                                                )
                                             }
                                         }
                                     }
@@ -289,53 +305,8 @@ class MainActivity : ComponentActivity() {
             isAlarmActive = true
         }
     }
-
-    /**
-     * Скачивание APK через DownloadManager и автоматическая установка.
-     * Используется ссылка на последний релиз GitHub.
-     */
-    private fun downloadAndInstall(context: Context, apkUrl: String) {
-        val fileName = "app-update.apk"
-        val destination = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            fileName
-        )
-
-        if (destination.exists()) destination.delete()
-
-        val request = DownloadManager.Request(Uri.parse(apkUrl))
-            .setTitle("Загрузка обновления")
-            .setDescription("Загружается новая версия Shift Alarm")
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setDestinationUri(Uri.fromFile(destination))
-            .setMimeType("application/vnd.android.package-archive")
-
-        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val downloadId = downloadManager.enqueue(request)
-
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                val id = intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1) ?: -1
-                if (id == downloadId) {
-                    val uri = FileProvider.getUriForFile(
-                        context!!,
-                        "${context.packageName}.fileprovider",
-                        destination
-                    )
-                    val installIntent = Intent(Intent.ACTION_VIEW).apply {
-                        setDataAndType(uri, "application/vnd.android.package-archive")
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                    context.startActivity(installIntent)
-                    context.unregisterReceiver(this)
-                }
-            }
-        }
-        context.registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
-    }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FullScreenAlarmScreen(
     label: String,
@@ -377,6 +348,7 @@ fun FullScreenAlarmScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(64.dp))
+
             Button(
                 onClick = onStopClick,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBA1A1A)),
@@ -387,6 +359,7 @@ fun FullScreenAlarmScreen(
                 Text("ОТКЛЮЧИТЬ", fontSize = 18.sp, color = Color.White)
             }
             Spacer(modifier = Modifier.height(16.dp))
+
             OutlinedButton(
                 onClick = onSnoozeClick,
                 modifier = Modifier
