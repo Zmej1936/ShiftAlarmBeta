@@ -31,7 +31,6 @@ class AlarmScheduler(private val context: Context) {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // ИСПРАВЛЕНО: Удалено лишнее слово Schedule в названии метода
             if (!alarmManager.canScheduleExactAlarms()) {
                 Log.e("AlarmScheduler", "Нет разрешения на точные будильники!")
                 return
@@ -77,17 +76,51 @@ class AlarmScheduler(private val context: Context) {
         }
     }
 
+    // УЛУЧШЕНО: Алгоритм тотальной инспекции и глубокой очистки памяти ОС Android
     fun rescheduleAllAlarms() {
         val storage = AlarmStorage(context)
         val activeAlarms = storage.getAlarms()
+        val activeIds = activeAlarms.map { it.id }.toSet()
 
-        Log.d("AlarmScheduler", "Фоновое обновление. Активных в JSON: ${activeAlarms.size}")
+        Log.d("AlarmScheduler", "=== ГЕНЕРАЛЬНАЯ УБОРКА ПАМЯТИ ===")
+        Log.d("AlarmScheduler", "Активных будильников в JSON: ${activeAlarms.size}")
 
+        // 1. АЛГОРИТМ ОЧИСТКИ СЛЕДОВ СТАРЫХ ВЕРСИЙ (Без Data URI):
+        // Пробегаем по пулу возможных старых ID от 0 до 100 и принудительно
+        // стираем старые "слепые" интенты, которые могли остаться в памяти телефона
+        for (oldId in 0..100) {
+            try {
+                // Создаем интент старого образца (без data = Uri.parse)
+                val oldIntent = Intent(context, targetReceiverClass)
+
+                // Ищем, есть ли такой старый триггер в системе (FLAG_NO_CREATE)
+                val oldPending = PendingIntent.getBroadcast(
+                    context, oldId, oldIntent, PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+                )
+                if (oldPending != null) {
+                    alarmManager.cancel(oldPending)
+                    oldPending.cancel()
+                    Log.d("AlarmScheduler", "Выжжен застрявший ПРИЗРАК старой версии приложения с ID: $oldId")
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        // 2. Планируем те будильники, которые реально есть в базе данных на экране
         activeAlarms.forEach { alarm ->
             if (alarm.isEnabled) {
                 scheduleAlarm(alarm, forceNextDay = false)
             } else {
                 cancelAllForAlarm(alarm)
+            }
+        }
+
+        // 3. Дополнительная зачистка для новых типов интентов (с Data URI)
+        // Если ID нет в файле JSON — стираем все его системные каналы
+        for (testId in 0..100) {
+            if (!activeIds.contains(testId)) {
+                cancelAllForAlarmIdOnly(testId)
             }
         }
     }
@@ -97,6 +130,18 @@ class AlarmScheduler(private val context: Context) {
         cancelPendingIntent(alarm, alarm.id + 1000)
         cancelPendingIntent(alarm, alarm.id + 5000)
         Log.d("AlarmScheduler", "===> Системный AlarmManager ТОТАЛЬНО ВЫЖЕГ таймеры для ID: ${alarm.id}")
+    }
+
+    // Вспомогательный метод очистки по ID для незарегистрированных элементов
+    private fun cancelAllForAlarmIdOnly(alarmId: Int) {
+        val dummyAlarm = Alarm(
+            id = alarmId, hour = 0, minute = 0, label = "", isEnabled = false,
+            shiftCycle = 0, startDate = "2026-05-20",
+            shiftType = com.example.shiftalarm.data.ShiftType.ALL, nextTriggerDateTime = ""
+        )
+        cancelPendingIntent(dummyAlarm, alarmId)
+        cancelPendingIntent(dummyAlarm, alarmId + 1000)
+        cancelPendingIntent(dummyAlarm, alarmId + 5000)
     }
 
     private fun cancelPendingIntent(alarm: Alarm, requestCode: Int) {

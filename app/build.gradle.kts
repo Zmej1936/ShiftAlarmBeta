@@ -14,8 +14,8 @@ android {
         applicationId = "com.example.shiftalarm"
         minSdk = 24
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.9.8.5"
+        versionCode = 4
+        versionName = "0.9.8.6"
     }
 
     buildFeatures {
