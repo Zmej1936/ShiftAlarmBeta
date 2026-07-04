@@ -1,6 +1,8 @@
 package com.example.shiftalarm.viewmodel
 
 import android.app.Application
+import android.content.Context
+import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.shiftalarm.data.Alarm
@@ -14,10 +16,8 @@ class AlarmViewModel(application: Application) : AndroidViewModel(application) {
     private val context = application.applicationContext
     private val scheduler = AlarmScheduler(context)
 
-    // Подписываем UI напрямую к потоку нашего реактивного репозитория
     val alarms: StateFlow<List<Alarm>> = AlarmRepository.alarmsFlow
 
-    // Получение конкретного будильника по ID для экрана редактирования
     fun getAlarmById(id: Int): kotlinx.coroutines.flow.Flow<Alarm?> {
         return kotlinx.coroutines.flow.flow {
             val list = AlarmRepository.alarmsFlow.value
@@ -25,7 +25,6 @@ class AlarmViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Сохранение через JSON-репозиторий
     fun insertAlarm(alarm: Alarm) {
         viewModelScope.launch {
             val currentList = AlarmRepository.alarmsFlow.value.toMutableList()
@@ -35,6 +34,8 @@ class AlarmViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 currentList.add(alarm)
             }
+            scheduler.cancelAllForAlarm(alarm)
+
             AlarmRepository.saveAlarms(context, currentList)
             if (alarm.isEnabled) {
                 scheduler.scheduleAlarm(alarm)
@@ -42,30 +43,32 @@ class AlarmViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ИСПРАВЛЕНО: Полная и гарантированная зачистка системных таймеров Android при удалении
     fun deleteAlarm(alarm: Alarm) {
         viewModelScope.launch {
-            // 1. Создаем временную копию отключенного будильника, чтобы AlarmManager железно стер триггер
-            val disabledAlarm = alarm.copy(isEnabled = false)
-            scheduler.cancelAllForAlarm(disabledAlarm)
+            android.util.Log.d("AlarmSched", "AlarmViewModel: Запрос на удаление будильника с ID: ${alarm.id}")
 
-            // 2. Дополнительно гасим исходный будильник во избежание кэширования флагов ОС
+            // ИСПРАВЛЕНО: try/catch и переменные приведены к нижнему регистру
+            try {
+                val serviceIntent = Intent(context, Class.forName("com.example.shiftalarm.receivers.AlarmSoundService"))
+                context.stopService(serviceIntent)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
             scheduler.cancelAllForAlarm(alarm)
 
-            // 3. Чисто удаляем карточку из нашего JSON-хранилища
             val currentList = AlarmRepository.alarmsFlow.value.filter { it.id != alarm.id }
             AlarmRepository.saveAlarms(context, currentList)
         }
     }
 
-    // Переключение тумблера активности
     fun updateAlarmEnabled(alarm: Alarm, isEnabled: Boolean) {
         viewModelScope.launch {
             val updatedAlarm = alarm.copy(isEnabled = isEnabled)
             if (isEnabled) {
                 scheduler.scheduleAlarm(updatedAlarm)
             } else {
-                scheduler.cancelAllForAlarm(alarm)
+                scheduler.cancelAllForAlarm(updatedAlarm)
             }
             AlarmRepository.updateAlarm(context, updatedAlarm)
         }
